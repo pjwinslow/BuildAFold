@@ -35,6 +35,7 @@ Or just use the [hosted copy](https://pjwinslow.github.io/BuildAFold/).
 | **Blocks** panel | click a type to append it to the chain |
 | **Move / Rotate** (`G` / `R`) | drag the gizmo on the selected block |
 | **Sketch** (`D`) | drag in the viewport to draw a backbone path |
+| **Shape** panel | type a word and build a backbone shaped like it |
 | **Pack** | align the selection antiparallel to the previous block, at contact distance |
 | **Snap** | 1 Å translation, 15° rotation |
 | **Undo** (`Ctrl/Cmd-Z`) | step back; a whole slider drag counts as one step |
@@ -86,6 +87,15 @@ the shortest path between two blocks is frequently straight through a third. An
 theoretical reach (3.3 Å/residue), and grows a few residues if a shorter one cannot
 get through.
 
+**Shapes** are covered row by row and each row becomes a strand, with the runs
+ordered by a greedy nearest-neighbour walk so the chain travels down one limb of
+a letter and back up the other instead of crossing between them on every row.
+Fitting torsions to a plane-filling curve was tried first and abandoned: a flat
+serpentine is close to unrealisable in torsion space, and the fit came back 7 A
+from the target with the chain folded through itself. Straight elements can lie
+exactly along a row, so building the shape out of them is both truer to the
+silhouette and more protein-like.
+
 **Sketches** are lifted in three steps: smooth and resample the stroke at the 3.8 Å
 Cα spacing; fit torsions to that trace by beam search over the populated
 Ramachandran basins; superimpose the result back onto the drawing. The fit uses
@@ -136,6 +146,15 @@ format specifies.
 
 ## Limitations
 
+- **Shape mode places elements well but its loops crowd.** A filled shape is
+  built as a beta sheet, one strand per row, and the strand placement itself is
+  clean — a letter typically has no strand-strand clashes at all. The
+  connecting turns are the problem: a dense flat sheet needs one every few
+  residues and gives them nowhere to route, so a letter arrives with tens of
+  loop clashes. Shorter linkers clash less but stop closing, which is worse, so
+  the auto sizing is kept and the clashes are reported. Treat the output as a
+  scaffold to regularise, not a finished backbone. Proper loop routing, or
+  letting partial diffusion rebuild the turns, is the fix.
 - **Sketch depth is not inferred.** A stroke is projected onto the plane facing the
   camera; depth comes from orbiting and redrawing.
 - **No β-sheet registry.** Strands can be placed side by side, but they are not

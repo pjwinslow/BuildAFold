@@ -25,6 +25,7 @@ import { liftSketch } from '../geometry/trace.js';
 import { writePDB } from '../io/pdb.js';
 import { buildDesignSpec, pipelineCommands, describeSpec } from '../io/designspec.js';
 import { Viewer } from './viewer.js';
+import { textToPaths, textToStrandBlocks } from './shapes.js';
 
 const SPACING = { helix: 10.5, helix310: 9.5, strand: 4.9, strandPar: 4.9, sketch: 8 };
 
@@ -262,6 +263,109 @@ function recentreSketchBlock(block, worldResidues) {
     .setFromUnitVectors(canonicalAxis, worldAxis)
     .toArray();
   block.position = centre.toArray();
+}
+
+/**
+ * Build a backbone shaped like the typed text.
+ *
+ * Each disconnected piece of the shape becomes its own block; the linkers that
+ * join them are the same ones used everywhere else, so the result is a single
+ * continuous chain that happens to read as a word. Pieces that torsion space
+ * cannot follow closely are reported rather than silently accepted.
+ */
+function buildShape() {
+  const text = document.getElementById('shape-text').value.trim();
+  if (!text) return flash('Type something to build first.');
+
+  const style = document.getElementById('shape-style').value;
+  try {
+    const built = style === 'outline' ? buildTracedShape(text) : buildSheetShape(text);
+    if (!built) return;
+
+    select(null);
+    viewer.syncBlocks(state.assembly);
+    scheduleRealize(true);
+    viewer.recentre(state.realized);
+    flash(built);
+  } catch (error) {
+    flash(`Could not build that shape: ${error.message}`);
+  }
+}
+
+/**
+ * Filled shapes are built as a beta sheet: one strand per row of the shape,
+ * alternating direction, joined by short turns. Straight elements can lie
+ * exactly along a row, so this follows the outline far more closely than a
+ * curve fitted through it, and it produces a fold rather than a wire.
+ */
+function buildSheetShape(text) {
+  const specs = textToStrandBlocks(text, { heightAngstroms: 70 });
+  if (!specs.length) return flash('That shape came out empty — try a larger word.');
+
+  snapshot();
+  state.assembly = createAssembly(`Shape: ${text}`);
+
+  const canonicalAxis = new THREE.Vector3(0, 0, 1);
+  let residues = 0;
+
+  for (const spec of specs) {
+    const direction = new THREE.Vector3(...spec.direction).normalize();
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(canonicalAxis, direction);
+    addBlock(state.assembly, {
+      type: 'strand',
+      nResidues: spec.nResidues,
+      position: spec.position,
+      quaternion: quaternion.toArray(),
+      name: `${text} strand ${state.assembly.blocks.length + 1}`,
+    });
+    residues += spec.nResidues;
+  }
+
+  return `Built "${text}" as ${specs.length} strands, ${residues} residues.`;
+}
+
+/**
+ * Outline mode traces the boundary and fits torsions to it. Kept because a
+ * traced silhouette survives better at small sizes, but it is approximate:
+ * a flat contour is not something backbone torsions can follow exactly, so the
+ * reported deviation is part of the result rather than a detail.
+ */
+function buildTracedShape(text) {
+  const paths = textToPaths(text, { style: 'outline', heightAngstroms: 70 });
+  if (!paths.length) return flash('That shape came out empty — try a larger word.');
+
+  snapshot();
+  state.assembly = createAssembly(`Shape: ${text}`);
+
+  let worst = 0;
+  let residues = 0;
+
+  for (const path of paths) {
+    let lifted;
+    try {
+      lifted = liftSketch(path, { smoothing: 1 });
+    } catch {
+      continue; // a piece too short to build; the others still stand
+    }
+    if (lifted.residues.length < 3) continue;
+
+    worst = Math.max(worst, lifted.rmsd);
+    residues += lifted.residues.length;
+    const block = addSketchBlock(state.assembly, lifted.residues, {
+      name: `${text} piece ${state.assembly.blocks.length + 1}`,
+    });
+    recentreSketchBlock(block, lifted.residues);
+  }
+
+  if (!state.assembly.blocks.length) {
+    undo();
+    return flash('Nothing in that shape was long enough to build.');
+  }
+
+  return (
+    `Traced "${text}": ${state.assembly.blocks.length} pieces, ${residues} residues, ` +
+    `within ${worst.toFixed(1)} A of the outline.`
+  );
 }
 
 function deleteBlock(id) {
@@ -721,6 +825,11 @@ document.getElementById('recentre').addEventListener('click', () => viewer.recen
 document.getElementById('export-pdb').addEventListener('click', exportPDB);
 document.getElementById('export-spec').addEventListener('click', exportSpec);
 document.getElementById('load-example').addEventListener('click', () => loadExample());
+document.getElementById('reset').addEventListener('click', resetAll);
+document.getElementById('shape-build').addEventListener('click', buildShape);
+document.getElementById('shape-text').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') buildShape();
+});
 
 document.getElementById('save').addEventListener('click', () => {
   deliver(
@@ -762,6 +871,21 @@ window.addEventListener('keydown', (event) => {
 });
 
 // --------------------------------------------------------------------- bootstrap
+
+/**
+ * Clear the design. Snapshotted first, so this is undoable like any other edit
+ * rather than a point of no return — which is also why it asks for no
+ * confirmation.
+ */
+function resetAll() {
+  if (!state.assembly.blocks.length) return flash('Nothing to clear.');
+  snapshot();
+  state.assembly.blocks = [];
+  select(null);
+  viewer.syncBlocks(state.assembly);
+  scheduleRealize(true);
+  flash('Cleared. Ctrl/Cmd-Z to bring it back.');
+}
 
 function loadExample() {
   snapshot();

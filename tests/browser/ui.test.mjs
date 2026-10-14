@@ -442,3 +442,61 @@ test('ribbon geometry is sane: strands unflipped, arrowheads taper', async () =>
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('reset clears every block and is undoable', async () => {
+  const { page, errors } = await openApp();
+  assert.equal(await page.locator('#chain-list li').count(), 4);
+
+  await page.locator('#reset').click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 0);
+
+  await page.locator('#undo').click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 4);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('shape mode builds a chain shaped like the typed text', async () => {
+  const { page, errors } = await openApp();
+
+  await page.locator('#shape-text').fill('AB');
+  await page.locator('#shape-build').click();
+
+  // Two letters are two disconnected pieces, so at least two blocks, joined by
+  // linkers into one chain.
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length >= 2, null, {
+    timeout: 60000,
+  });
+
+  const blocks = await page.locator('#chain-list li').count();
+  assert.ok(blocks >= 2, `expected a block per piece, got ${blocks}`);
+  assert.ok(await page.locator('.linker-row').count() >= 1, 'pieces should be linked');
+
+  const readout = await page.locator('#readout').textContent();
+  assert.match(readout, /Built "AB"|aa ·/);
+
+  // The chain must still be a real backbone: every residue accounted for in SS.
+  const info = await page.evaluate(() => {
+    const strip = document.querySelector('.ss-strip').textContent;
+    const count = Number(document.querySelector('#readout').textContent.match(/(\d+)\s*aa/)?.[1]);
+    return { strip, count };
+  });
+  if (Number.isFinite(info.count)) assert.equal(info.strip.length, info.count);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('shape mode reports an empty shape instead of building nothing', async () => {
+  const { page, errors } = await openApp();
+
+  await page.locator('#shape-text').fill('   ');
+  await page.locator('#shape-build').click();
+  await page.waitForFunction(() =>
+    document.querySelector('#readout').textContent.includes('Type something'),
+  );
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
