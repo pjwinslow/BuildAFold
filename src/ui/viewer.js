@@ -18,6 +18,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
+import { buildRibbon, flatProfile, arrowProfile } from './ribbon.js';
+
 const COLORS = {
   helix: 0xe05f6a,
   helix310: 0xd97aa0,
@@ -28,7 +30,7 @@ const COLORS = {
   loop: 0x7f8a9c,
 };
 
-const RADIUS = { H: 0.85, E: 0.75, L: 0.32 };
+const RADIUS = { H: 0.85, E: 0.75, L: 0.34 };
 
 export class Viewer {
   constructor(container, handlers = {}) {
@@ -326,7 +328,13 @@ export class Viewer {
 
   // ------------------------------------------------------------------- chain
 
-  /** Rebuild the rendered backbone from a realised assembly. */
+  /**
+   * Rebuild the rendered backbone from a realised assembly.
+   *
+   * Helices and strands are drawn as cartoon ribbons over exactly their own
+   * residues; loops are tubes that reach one residue into each neighbour, so
+   * they plug into the ribbon ends and no seam shows at the junction.
+   */
   showChain(realized) {
     this.clearChain();
     if (!realized || realized.residues.length < 2) return;
@@ -334,26 +342,12 @@ export class Viewer {
     const cas = realized.residues.map((r) => new THREE.Vector3(...r.CA));
 
     for (const segment of realized.segments) {
-      // Overlap neighbouring segments by one residue so tubes meet seamlessly.
-      const from = Math.max(0, segment.start - 1);
-      const to = Math.min(cas.length - 1, segment.end + 1);
-      const points = cas.slice(from, to + 1);
-      if (points.length < 2) continue;
-
       const code = ssCodeOf(segment.type);
-      const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
-      const divisions = Math.max(8, points.length * 6);
-      const geometry = new THREE.TubeGeometry(curve, divisions, RADIUS[code], 10, false);
-
-      const mesh = new THREE.Mesh(
-        geometry,
-        new THREE.MeshStandardMaterial({
-          color: COLORS[segment.type] ?? COLORS.loop,
-          roughness: 0.45,
-          metalness: 0.05,
-        }),
-      );
-      this.chainGroup.add(mesh);
+      const color = COLORS[segment.type] ?? COLORS.loop;
+      const mesh = code === 'L'
+        ? loopMesh(cas, segment, color)
+        : ribbonMesh(cas, segment, code, color);
+      if (mesh) this.chainGroup.add(mesh);
     }
 
     // Mark the chain termini so direction is never ambiguous.
@@ -395,6 +389,45 @@ export class Viewer {
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
+}
+
+/** A helix or strand drawn as a cartoon ribbon. */
+function ribbonMesh(cas, segment, code, color) {
+  const points = cas.slice(segment.start, segment.end + 1);
+  if (points.length < 2) return null;
+
+  const geometry = buildRibbon(points, {
+    color,
+    halfWidth: code === 'E' ? arrowProfile(points.length) : flatProfile(1.25),
+    halfThickness: code === 'E' ? 0.17 : 0.22,
+  });
+  if (!geometry) return null;
+
+  return new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.52,
+      metalness: 0.02,
+      side: THREE.DoubleSide,
+    }),
+  );
+}
+
+/** A loop drawn as a thin tube, reaching into the elements on either side. */
+function loopMesh(cas, segment, color) {
+  const from = Math.max(0, segment.start - 1);
+  const to = Math.min(cas.length - 1, segment.end + 1);
+  const points = cas.slice(from, to + 1);
+  if (points.length < 2) return null;
+
+  const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+  const geometry = new THREE.TubeGeometry(curve, Math.max(8, points.length * 6), RADIUS.L, 10, false);
+
+  return new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ color, roughness: 0.5, metalness: 0.02 }),
+  );
 }
 
 function ssCodeOf(type) {

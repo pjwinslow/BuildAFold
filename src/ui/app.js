@@ -115,10 +115,17 @@ function runRealize(preview) {
 function snapshot() {
   state.history.push(JSON.stringify(serialize(state.assembly)));
   if (state.history.length > 60) state.history.shift();
+  refreshUndoButton();
+}
+
+function refreshUndoButton() {
+  const button = document.getElementById('undo');
+  if (button) button.disabled = state.history.length === 0;
 }
 
 function undo() {
   const previous = state.history.pop();
+  refreshUndoButton();
   if (!previous) return;
   state.assembly = deserialize(JSON.parse(previous));
   if (!findBlock(state.selectedId)) state.selectedId = null;
@@ -257,12 +264,16 @@ function recentreSketchBlock(block, worldResidues) {
   block.position = centre.toArray();
 }
 
-function deleteSelected() {
-  if (!state.selectedId) return;
+function deleteBlock(id) {
+  if (!id || !findBlock(id)) return;
   snapshot();
-  removeBlock(state.assembly, state.selectedId);
-  select(null);
+  removeBlock(state.assembly, id);
+  if (state.selectedId === id) select(null);
   scheduleRealize(true);
+}
+
+function deleteSelected() {
+  deleteBlock(state.selectedId);
 }
 
 function select(id) {
@@ -333,6 +344,18 @@ function renderChainList() {
       `<span class="swatch" style="background:${swatch(block.type)}"></span>` +
       `<span class="name">${block.name}</span>` +
       `<span class="len">${block.nResidues}</span>`;
+
+    const remove = document.createElement('button');
+    remove.className = 'row-delete';
+    remove.type = 'button';
+    remove.textContent = '\u00d7';
+    remove.title = `Delete ${block.name}`;
+    remove.setAttribute('aria-label', `Delete ${block.name}`);
+    remove.addEventListener('click', (event) => {
+      event.stopPropagation(); // deleting should not also select the row
+      deleteBlock(block.id);
+    });
+    item.appendChild(remove);
 
     item.addEventListener('click', () => select(block.id));
     item.addEventListener('dragstart', (event) => {
@@ -692,6 +715,7 @@ for (const button of document.querySelectorAll('[data-tool]')) {
 document.getElementById('snap').addEventListener('change', (event) => {
   viewer.setSnap(event.target.checked);
 });
+document.getElementById('undo').addEventListener('click', undo);
 document.getElementById('pack').addEventListener('click', packAgainstPrevious);
 document.getElementById('recentre').addEventListener('click', () => viewer.recentre(state.realized));
 document.getElementById('export-pdb').addEventListener('click', exportPDB);
@@ -754,6 +778,8 @@ function loadExample() {
 renderPalette();
 loadExample();
 setMode('translate');
+state.history = []; // loading the example is not something to undo back past
+refreshUndoButton();
 
 // Watched by the boot check in index.html: if this never runs, the page says so
 // instead of showing an empty viewport.

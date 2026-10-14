@@ -74,6 +74,29 @@ export class Vector3 {
   toArray() {
     return [this.x, this.y, this.z];
   }
+  lerp(v, t) {
+    return this.set(
+      this.x + (v.x - this.x) * t,
+      this.y + (v.y - this.y) * t,
+      this.z + (v.z - this.z) * t,
+    );
+  }
+  negate() {
+    return this.set(-this.x, -this.y, -this.z);
+  }
+  subVectors(a, b) {
+    return this.set(a.x - b.x, a.y - b.y, a.z - b.z);
+  }
+  addVectors(a, b) {
+    return this.set(a.x + b.x, a.y + b.y, a.z + b.z);
+  }
+  crossVectors(a, b) {
+    return this.set(
+      a.y * b.z - a.z * b.y,
+      a.z * b.x - a.x * b.z,
+      a.x * b.y - a.y * b.x,
+    );
+  }
   applyQuaternion(q) {
     const { x, y, z } = this;
     const ix = q.w * x + q.y * z - q.z * y;
@@ -147,10 +170,22 @@ export class Vector2 {
 
 export class Color {
   constructor(hex = 0) {
-    this.hex = hex;
+    this.setHex(hex);
   }
   setHex(hex) {
     this.hex = hex;
+    this.r = ((hex >> 16) & 255) / 255;
+    this.g = ((hex >> 8) & 255) / 255;
+    this.b = (hex & 255) / 255;
+    return this;
+  }
+  clone() {
+    return new Color(this.hex);
+  }
+  multiplyScalar(s) {
+    this.r *= s;
+    this.g *= s;
+    this.b *= s;
     return this;
   }
 }
@@ -194,7 +229,22 @@ export class PerspectiveCamera extends Object3D {
   }
 }
 
+export class Float32BufferAttribute {
+  constructor(array, itemSize) {
+    this.array = array;
+    this.itemSize = itemSize;
+    this.count = array.length / itemSize;
+  }
+}
+
 class Geometry {
+  constructor() {
+    this.attributes = {};
+  }
+  setAttribute(name, attribute) {
+    this.attributes[name] = attribute;
+    return this;
+  }
   dispose() {}
   rotateX() {
     return this;
@@ -237,6 +287,17 @@ export class GridHelper extends Object3D {}
 export class CatmullRomCurve3 {
   constructor(points) {
     this.points = points;
+  }
+  getPoint(u) {
+    const span = this.points.length - 1;
+    const at = Math.max(0, Math.min(span, u * span));
+    const i = Math.min(span - 1, Math.floor(at));
+    return this.points[i].clone().lerp(this.points[i + 1], at - i);
+  }
+  getTangent(u) {
+    const span = this.points.length - 1;
+    const i = Math.min(span - 1, Math.max(0, Math.floor(u * span)));
+    return new Vector3().subVectors(this.points[i + 1], this.points[i]).normalize();
   }
 }
 
@@ -328,3 +389,7 @@ export class WebGLRenderer {
 }
 
 export const MathUtils = { degToRad: (d) => (d * Math.PI) / 180 };
+
+export const DoubleSide = 2;
+export const FrontSide = 0;
+export const BackSide = 1;

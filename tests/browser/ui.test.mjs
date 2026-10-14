@@ -349,3 +349,96 @@ test('embedded, exports are offered as text because downloads are blocked', asyn
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('each chain row has its own delete button', async () => {
+  const { page, errors } = await openApp();
+
+  const rows = page.locator('#chain-list li');
+  assert.equal(await rows.count(), 4);
+  assert.equal(await page.locator('#chain-list li .row-delete').count(), 4);
+
+  // Deleting the second row removes that row, and does not select it on the way.
+  await rows.nth(1).locator('.row-delete').click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 3);
+  assert.equal(await page.locator('#chain-list li.selected').count(), 0);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the undo button mirrors the keyboard shortcut and disables when empty', async () => {
+  const { page, errors } = await openApp();
+  const undo = page.locator('#undo');
+
+  assert.ok(await undo.isDisabled(), 'nothing to undo on a fresh page');
+
+  await page.locator('#palette button').first().click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 5);
+  assert.ok(await undo.isEnabled(), 'adding a block should enable undo');
+
+  await undo.click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 4);
+  assert.ok(await undo.isDisabled(), 'undo empties again');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('ribbon geometry is sane: strands unflipped, arrowheads taper', async () => {
+  // The viewport cannot be inspected visually here, so check the cartoon
+  // geometry numerically instead: the maths is what goes wrong.
+  const { page, errors } = await openApp();
+
+  const result = await page.evaluate(async () => {
+    const { sideVectors, buildRibbon, arrowProfile, flatProfile } = await import(
+      '/src/ui/ribbon.js'
+    );
+    const THREE = await import('three');
+
+    // A pleated strand: the raw side vector flips about 180 degrees each
+    // residue, which is what the alignment step has to undo.
+    const strand = [];
+    for (let i = 0; i < 10; i += 1) {
+      strand.push(new THREE.Vector3(i * 3.3, (i % 2 ? 1 : -1) * 0.9, 0));
+    }
+    const sides = sideVectors(strand);
+    let minDot = 1;
+    for (let i = 1; i < sides.length; i += 1) {
+      minDot = Math.min(minDot, sides[i].x * sides[i - 1].x + sides[i].y * sides[i - 1].y + sides[i].z * sides[i - 1].z);
+    }
+
+    const profile = arrowProfile(10);
+    const widths = { body: profile(0), justAfterFlare: profile(7.2), tip: profile(9) };
+
+    const helix = [];
+    for (let i = 0; i < 12; i += 1) {
+      const t = i * 1.75;
+      helix.push(new THREE.Vector3(Math.cos(t) * 2.3, Math.sin(t) * 2.3, i * 1.5));
+    }
+    const geometry = buildRibbon(helix, { halfWidth: flatProfile(1.25), halfThickness: 0.2 });
+    const array = geometry.attributes.position.array;
+
+    return {
+      minDot,
+      widths,
+      vertices: array.length / 3,
+      allFinite: Array.prototype.every.call(array, Number.isFinite),
+      trianglesWhole: (array.length / 3) % 3 === 0,
+      degenerate: buildRibbon([new THREE.Vector3(0, 0, 0)], {}),
+    };
+  });
+
+  assert.ok(
+    result.minDot > 0,
+    `strand side vectors flip between residues (worst dot ${result.minDot})`,
+  );
+  assert.ok(result.widths.justAfterFlare > result.widths.body * 1.5, 'arrow should flare out');
+  assert.ok(result.widths.tip < result.widths.body * 0.3, 'arrow should come to a point');
+  assert.ok(result.vertices > 100, 'ribbon should produce real geometry');
+  assert.ok(result.allFinite, 'ribbon vertices must all be finite');
+  assert.ok(result.trianglesWhole, 'vertices should form whole triangles');
+  assert.equal(result.degenerate, null, 'a one-residue run yields no ribbon');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});

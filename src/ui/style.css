@@ -537,3 +537,30 @@ h2 {
   grid-column: 1 / -1;
   grid-row: 2;
 }
+
+/* Delete control on each chain row. Dim until the row is hovered or focused so
+   a column of crosses does not compete with the chain itself. */
+.row-delete {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 15px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  opacity: 0.45;
+  transition: opacity 120ms ease, color 120ms ease;
+}
+.chain-list li:hover .row-delete,
+.chain-list li.selected .row-delete,
+.row-delete:focus-visible {
+  opacity: 1;
+}
+.row-delete:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+  background: rgba(229, 105, 107, 0.12);
+}
