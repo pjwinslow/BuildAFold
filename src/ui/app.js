@@ -518,6 +518,19 @@ function flash(message) {
 
 // --------------------------------------------------------------------- export
 
+/**
+ * Some embedded viewers block a page from starting its own download, and do it
+ * silently — the click simply does nothing. Rather than hand over a file that
+ * may never arrive, detect the case and show the text to copy instead.
+ */
+const canDownload = () => {
+  try {
+    return window.self === window.top;
+  } catch {
+    return false; // cross-origin frame
+  }
+};
+
 function download(filename, text, type = 'text/plain') {
   const url = URL.createObjectURL(new Blob([text], { type }));
   const link = document.createElement('a');
@@ -527,6 +540,46 @@ function download(filename, text, type = 'text/plain') {
   URL.revokeObjectURL(url);
 }
 
+function deliver(filename, text, type) {
+  if (canDownload()) {
+    download(filename, text, type);
+    flash(`Saved ${filename}`);
+    return;
+  }
+  showExportText(filename, text);
+}
+
+function showExportText(filename, text) {
+  document.getElementById('export-output').hidden = false;
+  document.getElementById('export-output-name').textContent = filename;
+  document.getElementById('export-text').value = text;
+  document.getElementById('export-note').textContent =
+    'This viewer blocks downloads, so the file is shown here. Copy it and save it ' +
+    `as ${filename}.`;
+}
+
+document.getElementById('export-close').addEventListener('click', () => {
+  document.getElementById('export-output').hidden = true;
+});
+
+document.getElementById('export-copy').addEventListener('click', async () => {
+  const field = document.getElementById('export-text');
+  const button = document.getElementById('export-copy');
+  try {
+    await navigator.clipboard.writeText(field.value);
+    button.textContent = 'Copied';
+  } catch {
+    // Clipboard access is refused in some viewers; select it so the user can
+    // copy with the keyboard.
+    field.focus();
+    field.select();
+    button.textContent = 'Press Ctrl/Cmd-C';
+  }
+  setTimeout(() => {
+    button.textContent = 'Copy';
+  }, 2000);
+});
+
 function exportPDB() {
   if (!state.realized?.residues.length) return flash('Nothing to export yet.');
   const spec = buildDesignSpec(state.assembly, state.realized);
@@ -534,14 +587,14 @@ function exportPDB() {
     segments: state.realized.segments,
     remarks: describeSpec(spec).split('\n'),
   });
-  download(`${slug(state.assembly.name)}.pdb`, text, 'chemical/x-pdb');
+  deliver(`${slug(state.assembly.name)}.pdb`, text, 'chemical/x-pdb');
 }
 
 function exportSpec() {
   if (!state.realized?.residues.length) return flash('Nothing to export yet.');
   const spec = buildDesignSpec(state.assembly, state.realized);
   spec.commands = pipelineCommands(spec, { stem: slug(state.assembly.name) });
-  download(`${slug(state.assembly.name)}.spec.json`, JSON.stringify(spec, null, 2), 'application/json');
+  deliver(`${slug(state.assembly.name)}.spec.json`, JSON.stringify(spec, null, 2), 'application/json');
 }
 
 // ---------------------------------------------------------------------- input
@@ -570,7 +623,11 @@ document.getElementById('export-spec').addEventListener('click', exportSpec);
 document.getElementById('load-example').addEventListener('click', () => loadExample());
 
 document.getElementById('save').addEventListener('click', () => {
-  download(`${slug(state.assembly.name)}.buildafold.json`, JSON.stringify(serialize(state.assembly), null, 2), 'application/json');
+  deliver(
+    `${slug(state.assembly.name)}.buildafold.json`,
+    JSON.stringify(serialize(state.assembly), null, 2),
+    'application/json',
+  );
 });
 document.getElementById('open').addEventListener('click', () => dom.fileInput.click());
 dom.fileInput.addEventListener('change', async (event) => {

@@ -1,4 +1,9 @@
 :root {
+  /* A single dark palette by choice: this is a 3D structure viewer, where a
+     dark field is the convention and keeps the chain the brightest thing on
+     screen. color-scheme makes native controls and scrollbars follow. */
+  color-scheme: dark;
+
   --bg: #0f1115;
   --panel: #171a21;
   --panel-2: #1e222b;
@@ -358,4 +363,101 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--muted);
+}
+
+/* Export output, used where the page cannot start a download of its own —
+   inside an embedded viewer, for instance. The text is shown for copying
+   rather than offered as a file that would silently fail to save. */
+.export-output {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.export-output-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.export-output-head .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--text);
+}
+.export-output textarea {
+  width: 100%;
+  min-width: 0;
+  height: 180px;
+  resize: vertical;
+  background: #0b0d11;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  white-space: pre;
+}
+
+/* Clear a system bar at the side or bottom without breaking the app shell:
+   the three-pane layout is full-bleed by design, so the insets go on the
+   elements that actually hold content rather than on body. */
+.topbar {
+  padding-left: max(14px, env(safe-area-inset-left, 0px));
+  padding-right: max(14px, env(safe-area-inset-right, 0px));
+}
+.panel.left {
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.panel.right {
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.panel section:last-child {
+  padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Narrow screens: stack the panes and let the page scroll. A pointer-driven
+   3D builder is not really a phone tool, but it should still be readable and
+   never scroll sideways. */
+@media (max-width: 900px) {
+  html,
+  body {
+    overflow: auto;
+  }
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+    padding-block: 8px;
+  }
+  .spacer {
+    display: none;
+  }
+  main {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(340px, 55vh) auto;
+    height: auto;
+  }
+  .panel {
+    overflow: visible;
+  }
+  .panel.left {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+  }
+  .panel.right {
+    border-left: none;
+    border-top: 1px solid var(--line);
+  }
+  .panel section.grow {
+    flex: none;
+  }
+  .stage {
+    min-height: 340px;
+  }
 }

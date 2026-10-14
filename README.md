@@ -185,6 +185,18 @@ VenusSketch: import an existing structure, hold it rigid, and build only into a
 defined region. The PDB parser and the block/linker machinery are already in
 place for it; what is missing is the UI for marking a region as fixed.
 
+## Publishing a hosted copy
+
+`node tools/build-artifact.js` generates `artifact/index.html`, a copy of the
+page without its own `<!doctype>`/`<html>`/`<head>`/`<body>`, for hosts that
+wrap the page in their own document skeleton. It is generated rather than
+hand-maintained so the hosted build cannot drift from the local one. Publish it
+alongside `src/` at matching relative paths.
+
+Embedded viewers often block a page from starting a download, silently. The
+export buttons detect that (`window.self !== window.top`) and show the file
+text to copy instead of handing over a download that would never arrive.
+
 ## Performance
 
 A full realisation of a four-helix bundle takes ~160 ms: every linker is closed

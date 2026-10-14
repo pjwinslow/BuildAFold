@@ -1,0 +1,102 @@
+<title>BuildAFold</title>
+<link rel="stylesheet" href="src/ui/style.css" />
+<script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+        }
+      }
+    </script>
+
+    <header class="topbar">
+      <div class="brand">
+        <strong>BuildAFold</strong>
+        <span class="muted">backbone sketchpad</span>
+      </div>
+
+      <div class="toolgroup" role="group" aria-label="Manipulation mode">
+        <button data-tool="translate" class="active" title="Move (G)">Move</button>
+        <button data-tool="rotate" title="Rotate (R)">Rotate</button>
+        <button data-tool="sketch" title="Draw a shape (D)">Sketch</button>
+      </div>
+
+      <div class="toolgroup">
+        <label class="toggle" title="Snap to 1 A / 15 degrees">
+          <input type="checkbox" id="snap" />
+          <span>Snap</span>
+        </label>
+        <button id="pack" title="Pack the selected block against the previous one">Pack</button>
+        <button id="recentre">Recentre</button>
+      </div>
+
+      <div class="spacer"></div>
+
+      <div class="toolgroup">
+        <button id="load-example">Example</button>
+        <button id="open">Open…</button>
+        <button id="save">Save</button>
+      </div>
+    </header>
+
+    <main>
+      <aside class="panel left">
+        <section>
+          <h2>Blocks</h2>
+          <p class="hint">Click to append to the chain.</p>
+          <div id="palette" class="palette"></div>
+        </section>
+
+        <section class="grow">
+          <h2>Chain order</h2>
+          <p class="hint">N-terminus at the top. Drag to reorder.</p>
+          <ol id="chain-list" class="chain-list"></ol>
+        </section>
+      </aside>
+
+      <div class="stage">
+        <div id="viewport"></div>
+        <div id="sketch-hint" class="overlay-hint" hidden>
+          Drag to draw a backbone path. It is lifted onto the plane facing you,
+          then fitted to real torsions — rotate and redraw to adjust depth.
+        </div>
+        <div id="readout" class="readout"></div>
+      </div>
+
+      <aside class="panel right">
+        <section>
+          <h2>Selection</h2>
+          <div id="inspector" class="inspector">
+            <p class="hint">Nothing selected.</p>
+          </div>
+        </section>
+
+        <section>
+          <h2>Geometry check</h2>
+          <div id="validation" class="validation"></div>
+        </section>
+
+        <section class="grow">
+          <h2>Export</h2>
+          <div class="export-buttons">
+            <button id="export-pdb">Backbone .pdb</button>
+            <button id="export-spec">Design spec .json</button>
+          </div>
+          <p class="hint">Then run the prepare script to make model inputs:</p>
+          <pre id="commands" class="commands"></pre>
+
+          <div id="export-output" class="export-output" hidden>
+            <div class="export-output-head">
+              <span id="export-output-name" class="name"></span>
+              <button id="export-copy">Copy</button>
+              <button id="export-close">Close</button>
+            </div>
+            <textarea id="export-text" readonly spellcheck="false"></textarea>
+            <p class="hint" id="export-note"></p>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <input type="file" id="file-input" accept=".json" hidden />
+    <script type="module" src="src/ui/app.js"></script>
