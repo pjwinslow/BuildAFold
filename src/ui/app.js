@@ -678,3 +678,7 @@ function loadExample() {
 renderPalette();
 loadExample();
 setMode('translate');
+
+// Watched by the boot check in index.html: if this never runs, the page says so
+// instead of showing an empty viewport.
+window.__buildafoldReady = true;

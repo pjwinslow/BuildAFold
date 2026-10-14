@@ -61,6 +61,17 @@
           then fitted to real torsions — rotate and redraw to adjust depth.
         </div>
         <div id="readout" class="readout"></div>
+
+        <div id="boot-error" class="boot-error" hidden>
+          <strong>The 3D view did not start.</strong>
+          <p id="boot-error-detail"></p>
+          <p>
+            BuildAFold loads three.js from cdn.jsdelivr.net. If a network policy
+            blocks that, or the library failed to initialise, everything else on
+            this page still works — but the viewport will stay empty. Running it
+            locally is the reliable fallback; see the README.
+          </p>
+        </div>
       </div>
 
       <aside class="panel right">
@@ -100,3 +111,29 @@
 
     <input type="file" id="file-input" accept=".json" hidden />
     <script type="module" src="src/ui/app.js"></script>
+
+    <script>
+      // A module that fails to load leaves no trace in the page, so a blocked
+      // CDN or a broken import would otherwise just show an empty viewport.
+      // Say what happened instead.
+      (function () {
+        var firstError = null;
+        window.addEventListener(
+          'error',
+          function (event) {
+            if (!firstError && event && event.message) firstError = event.message;
+          },
+          true,
+        );
+
+        setTimeout(function () {
+          if (window.__buildafoldReady) return;
+          var box = document.getElementById('boot-error');
+          if (!box) return;
+          document.getElementById('boot-error-detail').textContent = firstError
+            ? 'Reported error: ' + firstError
+            : 'The three.js module never finished loading.';
+          box.hidden = false;
+        }, 8000);
+      })();
+    </script>

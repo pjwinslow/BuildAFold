@@ -185,6 +185,22 @@ VenusSketch: import an existing structure, hold it rigid, and build only into a
 defined region. The PDB parser and the block/linker machinery are already in
 place for it; what is missing is the UI for marking a region as fixed.
 
+## Hosting it publicly
+
+The app is entirely static, so it deploys to GitHub Pages with no server.
+`.github/workflows/deploy` runs the tests, assembles `_site/` from `index.html`
+and `src/` (leaving tests, tooling and the Python helper out of what is served)
+and publishes it. It runs on every push; only the default branch deploys.
+
+The published URL is `https://<owner>.github.io/<repo>/`, shown on the
+workflow run and under Settings -> Pages. If the deploy step fails with a
+permissions error, set Settings -> Pages -> Source to "GitHub Actions" once and
+re-run it.
+
+three.js is loaded from a CDN, so the page needs network access to
+cdn.jsdelivr.net on first load. If it cannot be reached the page says so
+instead of showing an empty viewport.
+
 ## Publishing a hosted copy
 
 `node tools/build-artifact.js` generates `artifact/index.html`, a copy of the
