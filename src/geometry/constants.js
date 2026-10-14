@@ -61,8 +61,20 @@ export const SS3 = {
 };
 
 /**
- * Approximate maximum Cα-Cα span reachable by `n` intervening residues.
- * A fully extended chain advances ~3.3 A of end-to-end distance per residue
- * once bond angles are accounted for; this is the usual loop-feasibility rule.
+ * Hard limit on the Cα-Cα span `n` intervening residues can reach: a fully
+ * extended chain advances ~3.3 A of end-to-end distance per residue once bond
+ * angles are accounted for. Beyond this a gap is simply unbridgeable.
  */
 export const MAX_SPAN_PER_RESIDUE = 3.3;
+
+/**
+ * Span per residue to *plan* a linker against.
+ *
+ * A loop sitting at its theoretical reach is pulled straight: it has no
+ * conformational freedom left, the closure search stalls, and the one conformation
+ * that does close is strained. Measured against this builder's own closure
+ * routine, loops need roughly 2.4 A per residue to close comfortably with room
+ * to route around obstacles. Auto-sized linkers use this; feasibility
+ * reporting still uses the hard limit above.
+ */
+export const COMFORTABLE_SPAN_PER_RESIDUE = 2.4;

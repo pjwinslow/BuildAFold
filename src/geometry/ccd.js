@@ -17,6 +17,43 @@ import { completeResidue } from './chain.js';
 import { clampToAllowed } from './rama.js';
 import { cross, distance, dot, normalize, scale, sub, wrapDeg } from './vec3.js';
 
+/**
+ * Count loop residues that collide with already-placed structure, or with the
+ * loop itself. Closure alone only guarantees the two ends meet — without this
+ * the shortest path between two blocks is frequently straight through a third.
+ */
+function countClashes(residues, avoid, cutoff, loopStart, sequenceSeparation) {
+  const cutoffSq = cutoff * cutoff;
+  let clashes = 0;
+
+  for (let i = 0; i < residues.length; i += 1) {
+    const ca = residues[i].CA;
+    const globalIndex = loopStart + i;
+
+    for (const obstacle of avoid) {
+      // Residues close in sequence are bonded neighbours, not obstacles.
+      if (
+        obstacle.index != null &&
+        Math.abs(obstacle.index - globalIndex) < sequenceSeparation
+      ) {
+        continue;
+      }
+      const dx = ca[0] - obstacle.xyz[0];
+      const dy = ca[1] - obstacle.xyz[1];
+      const dz = ca[2] - obstacle.xyz[2];
+      if (dx * dx + dy * dy + dz * dz < cutoffSq) {
+        clashes += 1;
+        break;
+      }
+    }
+
+    for (let j = i + sequenceSeparation; j < residues.length; j += 1) {
+      if (distance(ca, residues[j].CA) < cutoff) clashes += 1;
+    }
+  }
+  return clashes;
+}
+
 /** Small deterministic PRNG so retries are reproducible across runs. */
 function makeRng(seed) {
   let state = seed >>> 0 || 1;
@@ -147,11 +184,18 @@ function torsionAxis(prev, built, index, nResidues) {
  */
 export function closeLoop(prev, next, nResidues, options = {}) {
   const {
-    tolerance = 0.12,
+    // Tight enough that the junction peptide bond lands inside the 0.1 A
+    // tolerance the chain validator applies; a looser fit shows up downstream
+    // as a chain break.
+    tolerance = 0.05,
     maxSweeps = 400,
     restarts = 6,
     restrain = true,
     seed = 20260101,
+    avoid = [],
+    clashCutoff = 4.0,
+    loopStart = 0,
+    sequenceSeparation = 3,
   } = options;
 
   const feasibility = closureFeasibility(prev, next, nResidues);
@@ -215,10 +259,18 @@ export function closeLoop(prev, next, nResidues, options = {}) {
       }
     }
 
-    if (!best || rmsd < best.rmsd) {
-      best = { torsions: [...torsions], residues: built.residues, rmsd };
+    const converged = rmsd <= tolerance;
+    const clashes = avoid.length
+      ? countClashes(built.residues, avoid, clashCutoff, loopStart, sequenceSeparation)
+      : 0;
+    // Closing at all dominates; among closed solutions, prefer the one that
+    // routes around the existing structure rather than through it.
+    const rank = (converged ? 0 : 1000) + clashes * 10 + Math.min(rmsd, 9);
+
+    if (!best || rank < best.rank) {
+      best = { torsions: [...torsions], residues: built.residues, rmsd, clashes, rank, converged };
     }
-    if (best.rmsd <= tolerance) break;
+    if (best.converged && best.clashes === 0) break;
   }
 
   const residues = best.residues.map((residue) => completeResidue({ ...residue }));
@@ -226,7 +278,8 @@ export function closeLoop(prev, next, nResidues, options = {}) {
   return {
     residues,
     rmsd: best.rmsd,
-    converged: best.rmsd <= tolerance,
+    clashes: best.clashes,
+    converged: best.converged,
     psiPrev: best.torsions[0],
     phiNext: best.torsions[best.torsions.length - 1],
     torsions: best.torsions,
