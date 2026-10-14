@@ -152,8 +152,8 @@ function obstaclesFor({ built, remaining, loopStart, nLinker }) {
  * block when the route is crowded. Rather than emit that, an auto-sized linker
  * is retried a few residues longer — which is also what a human would do.
  */
-function resolveLinker({ prev, next, nLinker, grow, loopStart, built, remaining, closureOptions }) {
-  const candidates = grow ? [nLinker, nLinker + 1, nLinker + 2, nLinker + 3] : [nLinker];
+function resolveLinker({ prev, next, nLinker, grow, loopStart, built, remaining, closureOptions, preview }) {
+  const candidates = grow && !preview ? [nLinker, nLinker + 1, nLinker + 2, nLinker + 3] : [nLinker];
   let best = null;
 
   for (const nResidues of candidates) {
@@ -169,10 +169,26 @@ function resolveLinker({ prev, next, nLinker, grow, loopStart, built, remaining,
 }
 
 /**
+ * Closure settings for the interactive preview: one restart, a short sweep
+ * budget and a loose tolerance. The chain this produces is still a real closed
+ * backbone, just found with less effort — it is never what gets exported.
+ */
+export const PREVIEW_CLOSURE = {
+  restarts: 1,
+  maxSweeps: 80,
+  tolerance: 0.25,
+  stallThreshold: 5e-3,
+};
+
+/**
  * Place every block, close every linker, and concatenate into one chain.
  *
+ * Pass `preview` while a drag is in flight: linkers are closed quickly and are
+ * not grown to clear obstacles. Any state that is kept, validated or exported
+ * must come from a full (non-preview) realisation.
+ *
  * @param {object} assembly
- * @param {{closure?: object}} [options]
+ * @param {{closure?: object, preview?: boolean}} [options]
  * @returns {{residues: Array, segments: Array, ss: string, validation: object,
  *            closures: Array, ok: boolean}}
  */
@@ -217,7 +233,10 @@ export function realize(assembly, options = {}) {
           loopStart,
           built: residues,
           remaining: placed.slice(index),
-          closureOptions: options.closure,
+          preview: options.preview,
+          closureOptions: options.preview
+            ? { ...PREVIEW_CLOSURE, ...options.closure }
+            : options.closure,
         });
 
         // The preceding residue's psi was a free variable during closure, so its

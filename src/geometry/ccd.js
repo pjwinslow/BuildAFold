@@ -189,6 +189,9 @@ export function closeLoop(prev, next, nResidues, options = {}) {
     // as a chain break.
     tolerance = 0.05,
     maxSweeps = 400,
+    // Off by default: CCD improves unevenly, and cutting a sweep short changes
+    // which solution is found. The interactive preview turns it on deliberately.
+    stallThreshold = 0,
     restarts = 6,
     restrain = true,
     seed = 20260101,
@@ -229,6 +232,8 @@ export function closeLoop(prev, next, nResidues, options = {}) {
     let rmsd = probeRmsd(built.probe, next);
 
     for (let sweep = 0; sweep < maxSweeps && rmsd > tolerance; sweep += 1) {
+      const sweepStart = rmsd;
+
       for (let index = 0; index < nTorsions; index += 1) {
         const axis = torsionAxis(prev, built, index, nResidues);
         const moving = [built.probe.N, built.probe.CA, built.probe.C];
@@ -257,6 +262,11 @@ export function closeLoop(prev, next, nResidues, options = {}) {
           rmsd = candidateRmsd;
         }
       }
+
+      // CCD approaches a local basin asymptotically. Stopping once a sweep
+      // stops buying anything trades solution quality for speed, which is the
+      // right trade only while the user is mid-drag.
+      if (stallThreshold > 0 && sweepStart - rmsd < stallThreshold) break;
     }
 
     const converged = rmsd <= tolerance;

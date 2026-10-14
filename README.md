@@ -184,3 +184,12 @@ The natural next step in that direction is fixed-context editing, as in
 VenusSketch: import an existing structure, hold it rigid, and build only into a
 defined region. The PDB parser and the block/linker machinery are already in
 place for it; what is missing is the UI for marking a region as fixed.
+
+## Performance
+
+A full realisation of a four-helix bundle takes ~160 ms: every linker is closed
+from scratch by CCD, with restarts and obstacle avoidance. That is too slow for
+a drag, so mid-drag frames use cheap closure settings (one restart, short sweep
+budget, loose tolerance) and take ~5 ms. The preview is still a real closed
+backbone, and it only ever feeds the viewport — validation, the chain list and
+every export come from a full realisation after the drag ends.

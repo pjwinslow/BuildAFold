@@ -77,24 +77,33 @@ function scheduleRealize(immediate = false) {
   if (immediate) {
     clearTimeout(realizeTimer);
     realizeTimer = null;
-    runRealize();
+    runRealize(false);
     return;
   }
   if (realizeTimer) return;
-  const wait = Math.max(0, 90 - (performance.now() - lastRealize));
+  const wait = Math.max(0, 60 - (performance.now() - lastRealize));
   realizeTimer = setTimeout(() => {
     realizeTimer = null;
-    runRealize();
+    runRealize(true);
   }, wait);
 }
 
-function runRealize() {
+/**
+ * Mid-drag frames use the cheap closure settings and only redraw the chain.
+ * Validation, the chain list and the export commands are left alone until the
+ * drag ends, so nothing the user reads or exports ever comes from a preview.
+ */
+function runRealize(preview) {
   const started = performance.now();
-  state.realized = realize(state.assembly);
+  const result = realize(state.assembly, preview ? { preview: true } : undefined);
   lastRealize = performance.now();
 
   viewer.syncBlocks(state.assembly);
-  viewer.showChain(state.realized);
+  viewer.showChain(result);
+
+  if (preview) return;
+
+  state.realized = result;
   renderChainList();
   renderInspector();
   renderValidation(lastRealize - started);
