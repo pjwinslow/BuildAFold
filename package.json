@@ -1,0 +1,14 @@
+{
+  "name": "buildafold",
+  "version": "0.1.0",
+  "description": "Visual, block-based protein backbone builder that exports scaffolds for diffusion and sequence design",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "test": "node --test tests/",
+    "serve": "node tools/serve.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
