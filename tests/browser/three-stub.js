@@ -297,11 +297,25 @@ export class Box3 {
 export class WebGLRenderer {
   constructor() {
     this.domElement = document.createElement('canvas');
-    this.domElement.style.width = '100%';
-    this.domElement.style.height = '100%';
+    this.pixelRatio = 1;
   }
-  setPixelRatio() {}
-  setSize() {}
+  setPixelRatio(ratio) {
+    this.pixelRatio = ratio || 1;
+  }
+  /**
+   * Faithful to three.js, because the difference matters: the drawing buffer is
+   * scaled by the pixel ratio, and a CSS size is set only when `updateStyle` is
+   * not false. A canvas left without a CSS size falls back to its attribute
+   * size in CSS pixels, which is how it ends up larger than its container.
+   */
+  setSize(width, height, updateStyle = true) {
+    this.domElement.width = Math.floor(width * this.pixelRatio);
+    this.domElement.height = Math.floor(height * this.pixelRatio);
+    if (updateStyle !== false) {
+      this.domElement.style.width = `${width}px`;
+      this.domElement.style.height = `${height}px`;
+    }
+  }
   render() {
     globalThis.__renderCount = (globalThis.__renderCount ?? 0) + 1;
   }

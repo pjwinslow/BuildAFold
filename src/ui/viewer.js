@@ -114,7 +114,11 @@ export class Viewer {
     if (!w || !h) return;
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
-    this.renderer.setSize(w, h, false);
+    // updateStyle must stay on: three.js sizes the drawing buffer to
+    // width * devicePixelRatio, and without a CSS size the canvas falls back to
+    // that buffer size in CSS pixels. On any display above 1x it would then be
+    // wider than the stage and paint over the panel beside it.
+    this.renderer.setSize(w, h);
   }
 
   setMode(mode) {

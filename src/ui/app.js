@@ -375,11 +375,19 @@ function renderInspector() {
 
   if (block.kind === 'sse') {
     dom.inspector.appendChild(
-      numberField('Residues', block.nResidues, 2, 60, 1, (value) => {
-        snapshot();
-        block.nResidues = value;
-        block.name = SS_PRESETS[block.type].label;
-        scheduleRealize(true);
+      sliderField('Residues', block.nResidues, 2, 60, {
+        // Dragging previews on the cheap closure path so the chain keeps up;
+        // releasing commits the exact rebuild.
+        onPreview: (value) => {
+          block.nResidues = value;
+          scheduleRealize(false);
+          updateLengthReadout(block, value);
+        },
+        onCommit: (value) => {
+          block.nResidues = value;
+          block.name = SS_PRESETS[block.type].label;
+          scheduleRealize(true);
+        },
       }),
     );
     dom.inspector.appendChild(
@@ -425,6 +433,74 @@ function renderInspector() {
 
   actions.append(duplicate, remove);
   dom.inspector.appendChild(actions);
+}
+
+/**
+ * A slider paired with a number box, both showing the same value.
+ *
+ * The slider is for exploring — the chain rebuilds continuously as it moves, so
+ * you can see a helix grow into its neighbours — and the box is for typing an
+ * exact length. One undo entry is taken per interaction rather than per frame.
+ */
+function sliderField(label, value, min, max, { onPreview, onCommit }) {
+  const wrapper = document.createElement('label');
+  wrapper.className = 'slider-field';
+
+  const name = document.createElement('span');
+  name.className = 'slider-label';
+  name.textContent = label;
+
+  const range = document.createElement('input');
+  range.type = 'range';
+  Object.assign(range, { min, max, step: 1, value });
+
+  const number = document.createElement('input');
+  number.type = 'number';
+  Object.assign(number, { min, max, step: 1, value });
+
+  const clamp = (raw) => Math.min(max, Math.max(min, Math.round(Number(raw))));
+
+  let editing = false;
+  const beginEdit = () => {
+    if (editing) return;
+    editing = true;
+    snapshot(); // one undo step for the whole drag, taken before anything moves
+  };
+
+  range.addEventListener('pointerdown', beginEdit);
+  range.addEventListener('keydown', beginEdit);
+
+  range.addEventListener('input', () => {
+    beginEdit();
+    const next = clamp(range.value);
+    number.value = next;
+    onPreview(next);
+  });
+
+  const commit = (source) => {
+    const next = clamp(source.value);
+    if (!Number.isFinite(next)) return;
+    beginEdit();
+    range.value = next;
+    number.value = next;
+    editing = false;
+    onCommit(next);
+  };
+
+  range.addEventListener('change', () => commit(range));
+  number.addEventListener('change', () => commit(number));
+
+  wrapper.append(name, range, number);
+  return wrapper;
+}
+
+/**
+ * Keep the corner readout truthful while a slider is being dragged; the full
+ * panels are only refreshed on the exact rebuild.
+ */
+function updateLengthReadout(block, value) {
+  dom.readout.innerHTML =
+    `<strong>${block.name}</strong>: ${value} residues · release to confirm`;
 }
 
 function numberField(label, value, min, max, step, onChange) {

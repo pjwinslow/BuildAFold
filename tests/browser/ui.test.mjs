@@ -50,8 +50,9 @@ test.after(async () => {
 });
 
 /** A page with the three.js imports redirected to the local test doubles. */
-async function openApp() {
-  const page = await browser.newPage();
+async function openApp(options = {}) {
+  const { navigate = true, ...contextOptions } = options;
+  const page = await browser.newPage(contextOptions);
   const errors = [];
   page.on('pageerror', (error) => errors.push(String(error)));
   page.on('console', (message) => {
@@ -71,6 +72,8 @@ async function openApp() {
       body: await readFile(resolve(here, file), 'utf8'),
     });
   });
+
+  if (!navigate) return { page, errors };
 
   await page.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => document.querySelectorAll('#palette button').length > 0);
@@ -236,3 +239,113 @@ async function streamToString(stream) {
   for await (const chunk of stream) chunks.push(chunk);
   return Buffer.concat(chunks).toString('utf8');
 }
+
+test('the canvas never paints over the panels beside it', async () => {
+  // Regression: the renderer was sized with updateStyle disabled, so the canvas
+  // kept its drawing-buffer size (width * devicePixelRatio) as its CSS size and
+  // spilled over the right-hand panel on any display above 1x. A 1x viewport
+  // hides the bug entirely, so this runs at 2x.
+  const { page, errors } = await openApp({ deviceScaleFactor: 2, viewport: { width: 1280, height: 800 } });
+
+  const metrics = await page.evaluate(() => {
+    const canvas = document.querySelector('#viewport canvas');
+    const stage = document.querySelector('.stage');
+    const panel = document.querySelector('.panel.right');
+    return {
+      ratio: window.devicePixelRatio,
+      canvasRight: canvas.getBoundingClientRect().right,
+      canvasWidth: canvas.getBoundingClientRect().width,
+      stageRight: stage.getBoundingClientRect().right,
+      stageWidth: stage.getBoundingClientRect().width,
+      panelLeft: panel.getBoundingClientRect().left,
+      bodyScrollsSideways: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+    };
+  });
+
+  assert.ok(metrics.ratio > 1, 'the test must run above 1x to be meaningful');
+  assert.ok(
+    metrics.canvasWidth <= metrics.stageWidth + 1,
+    `canvas (${metrics.canvasWidth}px) is wider than its stage (${metrics.stageWidth}px)`,
+  );
+  assert.ok(
+    metrics.canvasRight <= metrics.panelLeft + 1,
+    `canvas reaches ${metrics.canvasRight}px, past the panel edge at ${metrics.panelLeft}px`,
+  );
+  assert.equal(metrics.bodyScrollsSideways, false, 'the page must not scroll sideways');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the residue slider resizes a block and takes one undo step', async () => {
+  const { page, errors } = await openApp();
+
+  await page.locator('#chain-list li').first().click();
+  const slider = page.locator('#inspector input[type="range"]').first();
+  await slider.waitFor();
+
+  assert.equal(await slider.inputValue(), '16');
+
+  // Drive it the way a drag does: several input events, then a commit.
+  await slider.evaluate((el) => {
+    for (const value of [20, 26, 32]) {
+      el.value = String(value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
+  await page.waitForFunction(
+    () => document.querySelector('#chain-list li .len')?.textContent.trim() === '32',
+  );
+
+  // The number box beside it tracks the slider.
+  assert.equal(await page.locator('#inspector input[type="number"]').first().inputValue(), '32');
+
+  // A whole drag is one undo step, not one per frame.
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(
+    () => document.querySelector('#chain-list li .len')?.textContent.trim() === '16',
+  );
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the export panel stays hidden until an export is made', async () => {
+  // Regression: .export-output sets `display: flex`, which overrode the
+  // browser's `[hidden] { display: none }` and left the panel on screen from
+  // the first paint, overlapping the rest of the export section.
+  const { page, errors } = await openApp();
+  assert.ok(await page.locator('#export-output').isHidden(), 'panel should start hidden');
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('embedded, exports are offered as text because downloads are blocked', async () => {
+  // In a frame the page cannot start a download, and the attempt fails
+  // silently, so the file is shown to copy instead. This is the path a page
+  // embedded in another site takes.
+  const { page, errors } = await openApp({ navigate: false });
+  await page.setContent(
+    `<body style="margin:0"><iframe id="f" src="${BASE}/index.html" ` +
+      `style="width:1200px;height:800px;border:0"></iframe></body>`,
+  );
+
+  const app = page.frameLocator('#f');
+  await app.locator('#palette button').first().waitFor({ timeout: 20000 });
+  assert.ok(await app.locator('#export-output').isHidden(), 'panel should start hidden');
+
+  await app.locator('#export-spec').click();
+  await app.locator('#export-output').waitFor({ state: 'visible', timeout: 10000 });
+
+  const spec = JSON.parse(await app.locator('#export-text').inputValue());
+  assert.equal(spec.format, 'buildafold.designspec');
+  assert.equal(spec.ssIndex.length, spec.length);
+
+  await app.locator('#export-close').click();
+  await app.locator('#export-output').waitFor({ state: 'hidden' });
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
