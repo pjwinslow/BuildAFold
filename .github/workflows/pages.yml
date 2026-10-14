@@ -41,11 +41,12 @@ jobs:
           node-version: '22'
       - name: Assemble the site
         run: node tools/build-site.js
+      # Requires Pages to be switched on once, under
+      # Settings -> Pages -> Source: "GitHub Actions". The workflow token is
+      # not permitted to switch it on itself (it gets "Resource not accessible
+      # by integration"), so until that is done this step fails with
+      # "Get Pages site failed. Error: Not Found".
       - uses: actions/configure-pages@v5
-        with:
-          # Turn Pages on for the repository if it is not already, so this
-          # needs no manual step in the repository settings.
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

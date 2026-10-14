@@ -192,10 +192,13 @@ The app is entirely static, so it deploys to GitHub Pages with no server.
 and `src/` (leaving tests, tooling and the Python helper out of what is served)
 and publishes it. It runs on every push; only the default branch deploys.
 
-The published URL is `https://<owner>.github.io/<repo>/`, shown on the
-workflow run and under Settings -> Pages. If the deploy step fails with a
-permissions error, set Settings -> Pages -> Source to "GitHub Actions" once and
-re-run it.
+Pages has to be switched on once, by hand: **Settings -> Pages -> Source:
+"GitHub Actions"**. The workflow token is not allowed to do this itself, so
+until it is done the deploy step fails with `Get Pages site failed. Error: Not
+Found`. After that every push to the default branch deploys automatically.
+
+The published URL is `https://<owner>.github.io/<repo>/`, shown on the workflow
+run and under Settings -> Pages.
 
 three.js is loaded from a CDN, so the page needs network access to
 cdn.jsdelivr.net on first load. If it cannot be reached the page says so
