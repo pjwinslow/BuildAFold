@@ -18,6 +18,39 @@ sequences — it produces correct inputs for the tools that do.
                                                         ProteinMPNN
 ```
 
+## Related work, and what this is not
+
+Sketching a topology and handing it to a generative model is well-trodden
+ground. The nearest relatives, and why this is not one of them:
+
+| | What it does | How this differs |
+|---|---|---|
+| [TopoBuilder](https://www.pnas.org/doi/10.1073/pnas.2206111119) (Correia lab, PNAS 2022) | Expands a topology string into an idealised sketch of elements with no loops, then folds and designs it with Rosetta | Closest in concept, and its layer spacings are essentially the ones used here. It takes a string and runs offline; this is direct manipulation with live feedback |
+| [ProtoShop](https://web.cs.ucdavis.edu/~okreylos/ResDev/ProtoShop/MainPage.html) (UC Davis) | Drag helices and strands, with the drag converted into dihedral changes in the connecting coils | Closest in interaction, and it got there first. Desktop software, not a browser page, and it predates the generative tools this exports for |
+| [ProtPainter](https://arxiv.org/pdf/2504.14274) (ICLR 2025) | Draw a 3D curve; a model infers secondary structure from it and diffusion builds the backbone | Does properly, with a learned model, what the sketch mode here does with a torsion fit. Needs a GPU and takes seconds to minutes per sample |
+| [CAD blueprint-guided diffusion](https://www.biorxiv.org/content/10.64898/2026.07.22.740177v1) (Qi, Kortemme, Huang 2026) | Makes global shape a programmable design layer, with a signed-distance boundary term and Chamfer distance to a CAD blueprint | The serious version of "build a protein shaped like this" — 31 of 59 designs validated by crystallography or EM. Shape mode here is a toy beside it |
+| [DiffTopo](https://www.biorxiv.org/content/10.1101/2024.02.01.578456.full.pdf) (ICLR workshop 2024) | Diffuses coarse topologies that then steer RFdiffusion | Generates topologies; this one lets you specify a particular topology by hand |
+| [Tamarind](https://www.tamarind.bio/tools/rfdiffusion), Neurosnap | Hosted RFdiffusion behind a web form | Runs the models; this prepares their inputs and runs nothing |
+
+**"Couldn't you just do this in PyMOL?"** Partly. `fab SEQUENCE, ss=1` builds an
+ideal helix, so placing elements is easy. But PyMOL has no loop closure: joining
+two fragments means moving them into one object and forming the bond by hand,
+with nothing constraining the relative orientation. It also will not tell you
+whether a linker is geometrically reachable, or emit conditioning tensors.
+PyMOL builds the pieces; connecting them is the part this does.
+
+The stronger objection is PyRosetta, where cyclic coordinate descent is a
+built-in mover and blueprint-based building already exists. A competent person
+could script most of this. The argument for this tool is not that the
+algorithms are new — they are textbook — but that nothing found combines them
+into something that opens in a browser, responds immediately, and emits
+standard inputs.
+
+**So, plainly: this is a sketchpad, not a design method.** It runs no model,
+scores nothing, and has no energy function. A chain that passes its checks is
+physically possible, not stable, foldable or designable. Use it to specify a
+shape quickly and get correct inputs for the tools that do the real work.
+
 ## Quickstart
 
 Nothing to install and no build step:
