@@ -32,6 +32,10 @@
           <input type="checkbox" id="snap" />
           <span>Snap</span>
         </label>
+        <label class="toggle" title="Mark steric clashes in the viewport">
+          <input type="checkbox" id="show-clashes" checked />
+          <span>Clashes</span>
+        </label>
         <button id="undo" title="Undo (Ctrl/Cmd-Z)" disabled>Undo</button>
         <button id="pack" title="Pack the selected block against the previous one">Pack</button>
         <button id="recentre">Recentre</button>
@@ -61,10 +65,17 @@
           <div class="shape-form">
             <input id="shape-text" type="text" value="AB" maxlength="12"
                    placeholder="letters or a word" aria-label="Shape text" />
-            <select id="shape-style" aria-label="Shape coverage">
-              <option value="fill">Filled</option>
-              <option value="outline">Outline</option>
+            <select id="shape-style" aria-label="Shape style">
+              <option value="strokes">Helix strokes</option>
+              <option value="strokes-strand">Strand strokes</option>
+              <option value="fill">Filled sheet</option>
+              <option value="outline">Traced outline</option>
             </select>
+            <label class="shape-size">
+              <span>Letter height</span>
+              <input id="shape-height" type="number" value="44" min="14" max="90" step="2" />
+              <span class="unit">A</span>
+            </label>
             <button id="shape-build">Build shape</button>
           </div>
         </section>

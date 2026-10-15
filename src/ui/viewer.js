@@ -85,6 +85,9 @@ export class Viewer {
     this.scene.add(this.chainGroup);
     this.proxyGroup = new THREE.Group();
     this.scene.add(this.proxyGroup);
+    this.clashGroup = new THREE.Group();
+    this.scene.add(this.clashGroup);
+    this.showClashMarkers = true;
 
     this.strokeLine = new THREE.Line(
       new THREE.BufferGeometry(),
@@ -353,6 +356,64 @@ export class Viewer {
     // Mark the chain termini so direction is never ambiguous.
     this.chainGroup.add(terminusMarker(cas[0], 0x4ec9a0));
     this.chainGroup.add(terminusMarker(cas[cas.length - 1], 0x5aa9ff));
+  }
+
+  /**
+   * Mark every steric clash in place.
+   *
+   * The geometry panel can say there are forty clashes, but not which part of
+   * the design is wrong. A marker at the midpoint of each offending pair, sized
+   * by how deep the overlap runs, turns that number into somewhere to look.
+   */
+  showClashes(realized) {
+    this.clearClashes();
+    if (!this.showClashMarkers || !realized?.validation?.clashes?.length) return;
+
+    const residues = realized.residues;
+    // Worst first, and capped: a few hundred markers would hide the structure
+    // they are meant to point at.
+    const clashes = realized.validation.clashes.slice(0, 150);
+
+    const geometry = new THREE.SphereGeometry(1, 10, 8);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xff4d4f,
+      emissive: 0x5c0f10,
+      roughness: 0.35,
+      transparent: true,
+      opacity: 0.72,
+      depthWrite: false,
+    });
+
+    for (const clash of clashes) {
+      const a = residues[clash.i]?.CA;
+      const b = residues[clash.j]?.CA;
+      if (!a || !b) continue;
+
+      const marker = new THREE.Mesh(geometry, material);
+      marker.position.set((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2);
+      // 4.0 A is the threshold; the deeper the overlap, the bigger the marker.
+      const severity = Math.max(0.1, (4.0 - clash.distance) / 4.0);
+      const radius = 0.7 + severity * 1.6;
+      marker.scale.setScalar(radius);
+      marker.userData.clash = clash;
+      this.clashGroup.add(marker);
+    }
+
+    this.clashGeometry = geometry;
+    this.clashMaterial = material;
+  }
+
+  clearClashes() {
+    for (const child of [...this.clashGroup.children]) this.clashGroup.remove(child);
+    this.clashGeometry?.dispose();
+    this.clashMaterial?.dispose();
+    this.clashGeometry = null;
+    this.clashMaterial = null;
+  }
+
+  setClashMarkers(visible) {
+    this.showClashMarkers = visible;
+    this.clashGroup.visible = visible;
   }
 
   clearChain() {

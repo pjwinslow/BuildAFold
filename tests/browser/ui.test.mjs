@@ -457,32 +457,47 @@ test('reset clears every block and is undoable', async () => {
   await page.close();
 });
 
-test('shape mode builds a chain shaped like the typed text', async () => {
+test('a letter builds as a few elements, not dozens', async () => {
   const { page, errors } = await openApp();
 
-  await page.locator('#shape-text').fill('AB');
+  await page.locator('#shape-text').fill('N');
   await page.locator('#shape-build').click();
+  await page.waitForFunction(
+    () => document.querySelector('#readout').textContent.includes('Built "N"'),
+    null,
+    { timeout: 90000 },
+  );
 
-  // Two letters are two disconnected pieces, so at least two blocks, joined by
-  // linkers into one chain.
-  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length >= 2, null, {
-    timeout: 60000,
-  });
+  // An N is three strokes, so it should be three elements.
+  assert.equal(await page.locator('#chain-list li').count(), 3);
 
-  const blocks = await page.locator('#chain-list li').count();
-  assert.ok(blocks >= 2, `expected a block per piece, got ${blocks}`);
-  assert.ok(await page.locator('.linker-row').count() >= 1, 'pieces should be linked');
+  // And a protein-sized one: tens of residues, not hundreds.
+  const residues = Number(
+    (await page.locator('.metrics').textContent()).match(/Residues\s*(\d+)/)[1],
+  );
+  assert.ok(residues > 30 && residues < 160, `N came out at ${residues} residues`);
 
-  const readout = await page.locator('#readout').textContent();
-  assert.match(readout, /Built "AB"|aa ·/);
+  assert.deepEqual(errors, []);
+  await page.close();
+});
 
-  // The chain must still be a real backbone: every residue accounted for in SS.
-  const info = await page.evaluate(() => {
-    const strip = document.querySelector('.ss-strip').textContent;
-    const count = Number(document.querySelector('#readout').textContent.match(/(\d+)\s*aa/)?.[1]);
-    return { strip, count };
-  });
-  if (Number.isFinite(info.count)) assert.equal(info.strip.length, info.count);
+test('letter height rescales the elements', async () => {
+  const { page, errors } = await openApp();
+  const build = async (height) => {
+    await page.locator('#shape-height').fill(String(height));
+    await page.locator('#shape-text').fill('N');
+    await page.locator('#shape-build').click();
+    await page.waitForFunction(
+      () => document.querySelector('#readout').textContent.includes('Built "N"'),
+      null,
+      { timeout: 90000 },
+    );
+    return Number((await page.locator('.metrics').textContent()).match(/Residues\s*(\d+)/)[1]);
+  };
+
+  const small = await build(24);
+  const large = await build(70);
+  assert.ok(large > small * 1.5, `expected a taller letter to use more residues (${small} -> ${large})`);
 
   assert.deepEqual(errors, []);
   await page.close();
@@ -496,6 +511,36 @@ test('shape mode reports an empty shape instead of building nothing', async () =
   await page.waitForFunction(() =>
     document.querySelector('#readout').textContent.includes('Type something'),
   );
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('clashes are listed and can be hidden', async () => {
+  const { page, errors } = await openApp();
+
+  // Drive two helices through each other to guarantee a clash.
+  await page.locator('#chain-list li').nth(1).click();
+  await page.evaluate(() => {
+    const field = document.querySelector('#inspector input[type="number"]');
+    field.value = '40';
+    field.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.waitForFunction(() =>
+    document.querySelector('.validation .status')?.textContent.includes('Not buildable'),
+  );
+
+  // The worst overlaps are named, with residue numbers to go and look at.
+  const listed = await page.locator('.clash-list li').count();
+  assert.ok(listed > 0, 'clashes should be listed individually');
+  const first = await page.locator('.clash-list li').first().textContent();
+  assert.match(first, /residue \d+ .* \d+\.\d\d A/);
+
+  // The viewport markers can be switched off.
+  const toggle = page.locator('#show-clashes');
+  assert.ok(await toggle.isChecked());
+  await toggle.uncheck();
+  assert.ok(!(await toggle.isChecked()));
 
   assert.deepEqual(errors, []);
   await page.close();

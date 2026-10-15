@@ -422,3 +422,81 @@ export function orderRuns(runs, rowAspect = 1) {
 
   return ordered;
 }
+
+/**
+ * Greedy nearest-neighbour ordering for arbitrary 2D segments.
+ *
+ * The same idea as `orderRuns`, but for strokes rather than rows: visit
+ * whichever segment starts nearest to where the last one finished, flipping it
+ * if its far end is closer. On a letter this keeps the connecting loops short —
+ * the crossbar of an "A" is picked up from whichever leg ends beside it.
+ *
+ * @param {Array<{a: number[], b: number[]}>} segments
+ * @returns {Array} the same segments, reordered and reoriented
+ */
+export function orderSegments(segments) {
+  if (segments.length < 2) return segments.map((s) => ({ ...s }));
+
+  const copy = (s) => ({ ...s, a: [...s.a], b: [...s.b] });
+  const gap = (p, q) => Math.hypot(q[0] - p[0], q[1] - p[1]);
+
+  const travel = (list) => {
+    let sum = 0;
+    for (let i = 1; i < list.length; i += 1) sum += gap(list[i - 1].b, list[i].a);
+    return sum;
+  };
+
+  /** One greedy walk from a chosen first segment and orientation. */
+  const walkFrom = (startIndex, flipStart) => {
+    const remaining = segments.map(copy);
+    const first = remaining.splice(startIndex, 1)[0];
+    if (flipStart) [first.a, first.b] = [first.b, first.a];
+
+    const ordered = [first];
+    let cursor = first.b;
+
+    while (remaining.length) {
+      let best = 0;
+      let bestCost = Infinity;
+      let flip = false;
+
+      remaining.forEach((segment, index) => {
+        const atA = gap(cursor, segment.a);
+        const atB = gap(cursor, segment.b);
+        const cost = Math.min(atA, atB);
+        if (cost < bestCost) {
+          bestCost = cost;
+          best = index;
+          flip = atB < atA;
+        }
+      });
+
+      const segment = remaining.splice(best, 1)[0];
+      if (flip) [segment.a, segment.b] = [segment.b, segment.a];
+      ordered.push(segment);
+      cursor = segment.b;
+    }
+    return ordered;
+  };
+
+  // Greedy is sensitive to where it starts: forcing a particular first stroke
+  // can throw away a free join, such as the shared apex of an "A". Try every
+  // starting segment in both directions and keep the shortest walk.
+  let best = segments.map(copy);
+  let bestTravel = travel(best);
+
+  const starts = Math.min(segments.length, 60); // keep this cheap on long words
+  for (let index = 0; index < starts; index += 1) {
+    for (const flip of [false, true]) {
+      const candidate = walkFrom(index, flip);
+      const cost = travel(candidate);
+      if (cost < bestTravel) {
+        bestTravel = cost;
+        best = candidate;
+      }
+    }
+  }
+
+  // Never return a worse order than the one handed in.
+  return best;
+}

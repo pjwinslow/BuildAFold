@@ -36,6 +36,7 @@ Or just use the [hosted copy](https://pjwinslow.github.io/BuildAFold/).
 | **Move / Rotate** (`G` / `R`) | drag the gizmo on the selected block |
 | **Sketch** (`D`) | drag in the viewport to draw a backbone path |
 | **Shape** panel | type a word and build a backbone shaped like it |
+| **Clashes** toggle | red markers in the viewport at every steric overlap |
 | **Pack** | align the selection antiparallel to the previous block, at contact distance |
 | **Snap** | 1 Å translation, 15° rotation |
 | **Undo** (`Ctrl/Cmd-Z`) | step back; a whole slider drag counts as one step |
@@ -87,14 +88,24 @@ the shortest path between two blocks is frequently straight through a third. An
 theoretical reach (3.3 Å/residue), and grows a few residues if a shorter one cannot
 get through.
 
-**Shapes** are covered row by row and each row becomes a strand, with the runs
-ordered by a greedy nearest-neighbour walk so the chain travels down one limb of
-a letter and back up the other instead of crossing between them on every row.
-Fitting torsions to a plane-filling curve was tried first and abandoned: a flat
-serpentine is close to unrealisable in torsion space, and the fit came back 7 A
-from the target with the chain folded through itself. Straight elements can lie
-exactly along a row, so building the shape out of them is both truer to the
-silhouette and more protein-like.
+**Shapes** are built from a stroke font: each character is stored as the few
+lines you would draw it with, and every stroke segment becomes one element. An
+"N" is three strokes, so it is three helices. Strokes meet at shared corners, so
+each element is pulled back from its ends — about a fifth of the cap height —
+which both leaves room for the connecting loop and is, by measurement, the
+single biggest factor in whether a letter comes out clash-free.
+
+Two earlier approaches are worth recording. Fitting torsions to a plane-filling
+curve through the letter came back 7 A from the target shape with the chain
+folded through itself: a flat serpentine is close to unrealisable in torsion
+space. Covering the letter row by row as a beta sheet placed its strands
+cleanly, but needed two dozen of them per character and buried the letter in
+turns. Both are still available in the Shape panel as "Filled sheet" and
+"Traced outline"; neither is the default.
+
+**Clashes** are marked in place, as red spheres at the midpoint of each
+offending pair, sized by how deep the overlap runs. A count in a panel says
+something is wrong; a marker says where.
 
 **Sketches** are lifted in three steps: smooth and resample the stroke at the 3.8 Å
 Cα spacing; fit torsions to that trace by beam search over the populated
@@ -146,15 +157,14 @@ format specifies.
 
 ## Limitations
 
-- **Shape mode places elements well but its loops crowd.** A filled shape is
-  built as a beta sheet, one strand per row, and the strand placement itself is
-  clean — a letter typically has no strand-strand clashes at all. The
-  connecting turns are the problem: a dense flat sheet needs one every few
-  residues and gives them nowhere to route, so a letter arrives with tens of
-  loop clashes. Shorter linkers clash less but stop closing, which is worse, so
-  the auto sizing is kept and the clashes are reported. Treat the output as a
-  scaffold to regularise, not a finished backbone. Proper loop routing, or
-  letting partial diffusion rebuild the turns, is the fix.
+- **Shape mode still leaves some loop clashes.** Element placement is good —
+  across letters, element-on-element clashes are usually zero to three — but
+  the loops that join the strokes have to cross the letter, and some of them
+  pass through it. A short word often comes out clean; a dense letter like "H"
+  arrives with on the order of fifteen overlaps, all of them involving a loop.
+  They are marked in red so they are easy to find and fix by hand, and partial
+  diffusion would rebuild those turns anyway. Treat the output as a scaffold to
+  regularise rather than a finished backbone.
 - **Sketch depth is not inferred.** A stroke is projected onto the plane facing the
   camera; depth comes from orbiting and redrawing.
 - **No β-sheet registry.** Strands can be placed side by side, but they are not

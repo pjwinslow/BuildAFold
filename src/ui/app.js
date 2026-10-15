@@ -25,7 +25,7 @@ import { liftSketch } from '../geometry/trace.js';
 import { writePDB } from '../io/pdb.js';
 import { buildDesignSpec, pipelineCommands, describeSpec } from '../io/designspec.js';
 import { Viewer } from './viewer.js';
-import { textToPaths, textToStrandBlocks } from './shapes.js';
+import { textToPaths, textToStrandBlocks, textToStrokeBlocks } from './shapes.js';
 
 const SPACING = { helix: 10.5, helix310: 9.5, strand: 4.9, strandPar: 4.9, sketch: 8 };
 
@@ -101,6 +101,7 @@ function runRealize(preview) {
 
   viewer.syncBlocks(state.assembly);
   viewer.showChain(result);
+  viewer.showClashes(result);
 
   if (preview) return;
 
@@ -278,8 +279,21 @@ function buildShape() {
   if (!text) return flash('Type something to build first.');
 
   const style = document.getElementById('shape-style').value;
+  const capHeight = Math.max(
+    14,
+    Math.min(90, Number(document.getElementById("shape-height").value) || 44),
+  );
+
   try {
-    const built = style === 'outline' ? buildTracedShape(text) : buildSheetShape(text);
+    let built;
+    if (style === 'outline') built = buildTracedShape(text);
+    else if (style === 'fill') built = buildSheetShape(text);
+    else {
+      built = buildStrokeShape(text, {
+        capHeight,
+        type: style === 'strokes-strand' ? 'strand' : 'helix',
+      });
+    }
     if (!built) return;
 
     select(null);
@@ -290,6 +304,41 @@ function buildShape() {
   } catch (error) {
     flash(`Could not build that shape: ${error.message}`);
   }
+}
+
+/**
+ * Build text from its strokes: one element per stroke segment.
+ *
+ * A letter is a handful of lines, not a filled region, so this is both the
+ * natural decomposition and the right scale — an N is three helices, and a
+ * word comes out the size of a real protein rather than ten times it.
+ */
+function buildStrokeShape(text, options) {
+  const specs = textToStrokeBlocks(text, options);
+  if (!specs.length) {
+    return flash(`Nothing drawable in "${text}" — letters and digits only.`);
+  }
+
+  snapshot();
+  state.assembly = createAssembly(`Shape: ${text}`);
+
+  const canonicalAxis = new THREE.Vector3(0, 0, 1);
+  let residues = 0;
+
+  for (const spec of specs) {
+    const direction = new THREE.Vector3(...spec.direction).normalize();
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(canonicalAxis, direction);
+    addBlock(state.assembly, {
+      type: spec.type,
+      nResidues: spec.nResidues,
+      position: spec.position,
+      quaternion: quaternion.toArray(),
+      name: `${spec.char} stroke`,
+    });
+    residues += spec.nResidues;
+  }
+
+  return `Built "${text}" from ${specs.length} elements, ${residues} residues.`;
 }
 
 /**
@@ -682,6 +731,25 @@ function renderValidation(elapsedMs = 0) {
       `<span>Clashes</span><span>${validation.clashes.length}</span>` +
       '</div>',
   );
+  if (validation.clashes.length) {
+    const worst = validation.clashes.slice(0, 6);
+    parts.push(
+      '<p class="hint clash-caption">Worst overlaps, marked in red in the view:</p>' +
+        '<ul class="clash-list">' +
+        worst
+          .map(
+            (clash) =>
+              `<li>residue ${clash.i + 1} &harr; ${clash.j + 1}` +
+              ` <span>${clash.distance.toFixed(2)} A</span></li>`,
+          )
+          .join('') +
+        (validation.clashes.length > worst.length
+          ? `<li class="more">and ${validation.clashes.length - worst.length} more</li>`
+          : '') +
+        '</ul>',
+    );
+  }
+
   parts.push(`<code class="ss-strip">${colourSS(result.ss)}</code>`);
 
   dom.validation.innerHTML = parts.join('');
@@ -818,6 +886,9 @@ for (const button of document.querySelectorAll('[data-tool]')) {
 
 document.getElementById('snap').addEventListener('change', (event) => {
   viewer.setSnap(event.target.checked);
+});
+document.getElementById('show-clashes').addEventListener('change', (event) => {
+  viewer.setClashMarkers(event.target.checked);
 });
 document.getElementById('undo').addEventListener('click', undo);
 document.getElementById('pack').addEventListener('click', packAgainstPrevious);

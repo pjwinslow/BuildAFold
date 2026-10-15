@@ -195,6 +195,13 @@ export class Object3D {
     this.children = [];
     this.position = new Vector3();
     this.quaternion = new Quaternion();
+    // Real Object3D carries a scale; code that uses it must be exercised here
+    // too, or a call like scale.setScalar() only fails in a real browser.
+    this.scale = Object.assign(new Vector3(1, 1, 1), {
+      setScalar(v) {
+        return this.set(v, v, v);
+      },
+    });
     this.userData = {};
     this.visible = true;
   }

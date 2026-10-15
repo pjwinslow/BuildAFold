@@ -16,7 +16,9 @@ import {
   maskBounds,
   labelComponents,
   orderRuns,
+  orderSegments,
 } from '../geometry/shape.js';
+import { textSegments } from '../geometry/strokefont.js';
 
 const FONT_STACK = '"Helvetica Neue", Helvetica, Arial, sans-serif';
 
@@ -154,4 +156,66 @@ export function textToStrandBlocks(text, options = {}) {
   }
 
   return blocks;
+}
+
+/**
+ * Build a character as a few structural elements — one per stroke segment.
+ *
+ * This is the stroke-font route, and it is the default: an "N" comes out as
+ * three helices rather than two dozen strands, which is both what the letter
+ * actually is and the right size for a protein.
+ *
+ * @param {string} text
+ * @param {object} [options]
+ * @param {number} [options.capHeight=32] letter height in angstrom
+ * @param {string} [options.type='helix'] element type for each stroke
+ * @returns {Array<{type: string, nResidues: number, position: number[], direction: number[]}>}
+ */
+export function textToStrokeBlocks(text, options = {}) {
+  const {
+    capHeight = 44,
+    type = 'helix',
+    minResidues = 4,
+  } = options;
+
+  // Strokes of a letter meet at shared corners, so placed end to end the
+  // elements occupy the same space at every junction — which is what a pile of
+  // clashes at the corners of an "N" turns out to be. Pulling each end back
+  // leaves room for the connecting loop, where a real structure puts one
+  // anyway. Measured across letters and sizes, this is the single biggest
+  // factor in whether a built letter is clash-free: at a fifth of the cap
+  // height, element-on-element clashes drop to nearly none.
+  const inset = options.inset ?? Math.min(10, Math.max(4, capHeight * 0.2));
+
+  // Rise along the element axis, which sets how many residues a stroke needs.
+  const rise = type === 'strand' || type === 'strandPar' ? 3.3 : 1.5;
+
+  // Filter on what a stroke needs to exist at all, not on what it needs to
+  // survive a full inset: the trim below is clamped, so a mid-length stroke is
+  // simply trimmed less. Filtering on the full inset instead silently dropped
+  // the crossbar of an "A", leaving a letter that no longer reads as one.
+  const segments = orderSegments(
+    textSegments(text, { capHeight, minLength: minResidues * rise }),
+  );
+
+  return segments.map((segment) => {
+    const dx = segment.b[0] - segment.a[0];
+    const dy = segment.b[1] - segment.a[1];
+    const full = Math.hypot(dx, dy);
+    const unit = [dx / full, dy / full];
+
+    // Trim both ends, but never past the shortest element worth building.
+    const trim = Math.min(inset, Math.max(0, (full - minResidues * rise) / 2));
+    const a = [segment.a[0] + unit[0] * trim, segment.a[1] + unit[1] * trim];
+    const b = [segment.b[0] - unit[0] * trim, segment.b[1] - unit[1] * trim];
+    const span = Math.hypot(b[0] - a[0], b[1] - a[1]);
+
+    return {
+      type,
+      char: segment.char,
+      nResidues: Math.max(minResidues, Math.round(span / rise) + 1),
+      position: [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, 0],
+      direction: [unit[0], unit[1], 0],
+    };
+  });
 }
