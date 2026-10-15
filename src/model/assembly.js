@@ -12,6 +12,7 @@
 
 import { buildElement, cloneResidues, completeResidue } from '../geometry/chain.js';
 import { canonicalize, placeBlock } from '../geometry/frame.js';
+import { superpose } from '../geometry/kabsch.js';
 import { closeLoop, closureFeasibility } from '../geometry/ccd.js';
 import { validateChain } from '../geometry/validate.js';
 import { COMFORTABLE_SPAN_PER_RESIDUE, SS3, SS_PRESETS } from '../geometry/constants.js';
@@ -77,20 +78,59 @@ export function addBlock(assembly, spec) {
 
 /** Add a block whose geometry came from a sketched stroke. */
 export function addSketchBlock(assembly, residues, spec = {}) {
-  const canonical = canonicalize(cloneResidues(residues));
+  const world = cloneResidues(residues);
+  const canonical = canonicalize(world);
+
+  // Canonicalising moves the geometry to the origin, so the placement that
+  // puts it back where it was given has to be recovered — otherwise a block
+  // built from real coordinates silently lands at the origin, and a whole
+  // imported structure collapses into one pile.
+  const placement = restoringPlacement(canonical, world);
+
   const block = {
     id: newId('s'),
     kind: 'sketch',
-    type: 'sketch',
+    type: spec.type ?? 'sketch',
     nResidues: canonical.length,
     canonical,
-    position: spec.position ?? [0, 0, 0],
-    quaternion: spec.quaternion ?? [0, 0, 0, 1],
+    extent: axialExtent(canonical),
+    position: spec.position ?? placement.position,
+    quaternion: spec.quaternion ?? placement.quaternion,
     linkerBefore: spec.linkerBefore ?? 'auto',
     name: spec.name ?? `Sketch (${canonical.length} aa)`,
   };
   assembly.blocks.push(block);
   return block;
+}
+
+/**
+ * The position and rotation that map canonical geometry back onto where it
+ * came from. Superposition rather than an axis estimate, because the roll
+ * about the element's own axis matters too and a first-to-last vector does not
+ * capture it.
+ */
+function restoringPlacement(canonical, world) {
+  if (canonical.length < 3) {
+    const centre = world.length
+      ? world
+          .reduce((sum, r) => [sum[0] + r.CA[0], sum[1] + r.CA[1], sum[2] + r.CA[2]], [0, 0, 0])
+          .map((v) => v / world.length)
+      : [0, 0, 0];
+    return { position: centre, quaternion: [0, 0, 0, 1] };
+  }
+
+  const fit = superpose(
+    canonical.map((r) => r.CA),
+    world.map((r) => r.CA),
+  );
+  return { position: fit.translation, quaternion: fit.quaternion };
+}
+
+/** Length of a canonical block along its own axis, which canonicalise puts on z. */
+function axialExtent(canonical) {
+  if (!canonical.length) return 0;
+  const zs = canonical.map((r) => r.CA[2]);
+  return Math.max(...zs) - Math.min(...zs);
 }
 
 const defaultLength = (type) => (type === 'helix' || type === 'helix310' ? 14 : 7);
@@ -333,6 +373,7 @@ export function serialize(assembly) {
       quaternion: [...block.quaternion],
       linkerBefore: block.linkerBefore,
       name: block.name,
+      extent: block.extent,
       canonical:
         block.kind === 'sketch'
           ? block.canonical.map((r) => ({

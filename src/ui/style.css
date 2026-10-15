@@ -111,7 +111,11 @@ main {
   background: var(--panel);
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* The column scrolls as a whole. Scrolling each section separately meant
+     that adding a section squeezed the ones below it to nothing: the chain
+     order list became unreachable once Shape and Fetch were above it. */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .panel.left {
   border-right: 1px solid var(--line);
@@ -122,10 +126,11 @@ main {
 .panel section {
   padding: 12px;
   border-bottom: 1px solid var(--line);
-  overflow: auto;
+  /* Sections size to their content; the panel around them does the scrolling. */
+  flex: 0 0 auto;
 }
 .panel section.grow {
-  flex: 1;
+  flex: 0 0 auto;
 }
 h2 {
   margin: 0 0 6px;

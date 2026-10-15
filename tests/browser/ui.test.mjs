@@ -608,6 +608,18 @@ test('fetching a PDB imports its elements as editable blocks', async () => {
   assert.ok(await page.locator('#pdb-chain').isEnabled());
   assert.equal(await page.locator('#pdb-chain option').count(), 1);
 
+  // Regression: imported blocks are stored canonicalised at the origin. If the
+  // placement is not recovered they all stack up, which showed as an
+  // impossible radius of gyration and thousands of clashes.
+  const metrics = await page.locator('.metrics').textContent();
+  const rg = Number(metrics.match(/Radius of gyration\s*([\d.]+)/)[1]);
+  const clashes = Number(metrics.match(/Clashes\s*(\d+)/)[1]);
+  assert.ok(rg > 9, `radius of gyration ${rg} A means the elements collapsed together`);
+  assert.ok(clashes < 50, `${clashes} clashes means the elements are inside each other`);
+
+  // Imported helices keep their secondary structure, so they export as helices.
+  assert.match(await page.locator('.ss-strip').textContent(), /H/);
+
   // And they can be built onto: adding a helix extends the same chain.
   await page.locator('#palette button').first().click();
   await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 3);
@@ -654,6 +666,36 @@ test('a bad identifier is rejected before any request', async () => {
     { timeout: 30000 },
   );
   assert.equal(called, false, 'nothing should be requested for a malformed id');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the whole left panel scrolls, so the chain list stays reachable', async () => {
+  // Regression: each panel section scrolled on its own, so every section added
+  // above the chain order list squeezed it further until it could not be
+  // reached at all.
+  const { page, errors } = await openApp({ viewport: { width: 1280, height: 620 } });
+
+  const left = page.locator('.panel.left');
+  assert.equal(
+    await left.evaluate((el) => getComputedStyle(el).overflowY),
+    'auto',
+    'the panel itself must be the scroll container',
+  );
+
+  // Every section is laid out at its natural height, none crushed to nothing.
+  const heights = await left.evaluate((el) =>
+    [...el.querySelectorAll('section')].map((s) => s.getBoundingClientRect().height),
+  );
+  assert.ok(heights.length >= 4, 'blocks, shape, fetch and chain order');
+  for (const height of heights) assert.ok(height > 30, `a section collapsed to ${height}px`);
+
+  // The chain list can be scrolled to and used.
+  await page.locator('#chain-list li').first().scrollIntoViewIfNeeded();
+  assert.ok(await page.locator('#chain-list li').first().isVisible());
+  await page.locator('#chain-list li').first().click();
+  await page.waitForSelector('#chain-list li.selected');
 
   assert.deepEqual(errors, []);
   await page.close();

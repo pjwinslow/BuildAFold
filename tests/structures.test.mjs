@@ -9,7 +9,13 @@ import {
   chainSecondaryStructure,
 } from '../src/io/structures.js';
 import { writePDB, parseSecondaryStructureRecords } from '../src/io/pdb.js';
-import { createAssembly, addBlock, realize, resetIds } from '../src/model/assembly.js';
+import {
+  createAssembly,
+  addBlock,
+  addSketchBlock,
+  realize,
+  resetIds,
+} from '../src/model/assembly.js';
 import { distance } from '../src/geometry/vec3.js';
 
 /** A two-helix design written out as a PDB, with HELIX records. */
@@ -155,4 +161,74 @@ test('chainSecondaryStructure ignores records for other chains', () => {
     sheets: [],
   });
   assert.equal(result.source, 'assigned', 'records for chain B must not apply to chain A');
+});
+
+test('an imported structure keeps its geometry instead of collapsing', () => {
+  // Regression: blocks are stored canonicalised, at the origin. Without
+  // recovering the placement, every imported element stacked on top of every
+  // other one: a 283-residue chain came back with a radius of gyration of
+  // 7 A and five thousand clashes.
+  const { text, realized } = helixPairPdb();
+  const [chain] = parseStructure(text);
+  const elements = chainToElements(chain);
+
+  resetIds();
+  const imported = createAssembly('imported');
+  for (const element of elements) addSketchBlock(imported, element.residues);
+  const rebuilt = realize(imported);
+
+  // Each imported helix sits where it did in the file.
+  for (const element of elements) {
+    const first = element.residues[0].CA;
+    const match = rebuilt.residues.some((residue) => distance(residue.CA, first) < 0.3);
+    assert.ok(match, 'an imported element is not where the file put it');
+  }
+
+  // The whole thing is the size it was, not a pile at the origin.
+  const originalRg = realize(
+    (() => {
+      resetIds();
+      const a = createAssembly('x');
+      addBlock(a, { type: 'helix', nResidues: 14, position: [0, 0, 0] });
+      addBlock(a, { type: 'helix', nResidues: 14, position: [10.5, 0, 0], quaternion: [1, 0, 0, 0] });
+      return a;
+    })(),
+  ).validation.radiusOfGyration;
+
+  assert.ok(
+    Math.abs(rebuilt.validation.radiusOfGyration - originalRg) < 2.5,
+    `radius of gyration ${rebuilt.validation.radiusOfGyration.toFixed(1)} A ` +
+      `should be close to the original ${originalRg.toFixed(1)} A`,
+  );
+  assert.ok(
+    rebuilt.validation.clashes.length < 5,
+    `${rebuilt.validation.clashes.length} clashes means the elements are on top of each other`,
+  );
+  assert.ok(realized.residues.length > 0);
+});
+
+test('a sketch block round-trips through its own placement', () => {
+  // Build a helix somewhere arbitrary, import it, and check it comes back.
+  resetIds();
+  const source = createAssembly('src');
+  addBlock(source, {
+    type: 'helix',
+    nResidues: 12,
+    position: [17, -9, 4],
+    quaternion: [0.3, 0.5, -0.2, 0.78],
+  });
+  const placed = realize(source).residues;
+
+  resetIds();
+  const target = createAssembly('dst');
+  addSketchBlock(target, placed);
+  const rebuilt = realize(target).residues;
+
+  assert.equal(rebuilt.length, placed.length);
+  for (let i = 0; i < placed.length; i += 1) {
+    assert.ok(
+      distance(rebuilt[i].CA, placed[i].CA) < 0.05,
+      `residue ${i} moved ${distance(rebuilt[i].CA, placed[i].CA).toFixed(2)} A on import`,
+    );
+  }
 });

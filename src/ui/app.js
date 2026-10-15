@@ -238,34 +238,14 @@ function addSketchFromStroke(points) {
   snapshot();
   // liftSketch returns the chain already superimposed on the stroke, so the
   // block's own placement is the identity: its canonical frame carries the shape.
-  const block = addSketchBlock(state.assembly, lifted.residues, {
+  addSketchBlock(state.assembly, lifted.residues, {
     name: `Sketch (${lifted.residues.length} aa)`,
   });
-  recentreSketchBlock(block, lifted.residues);
   select(block.id);
   scheduleRealize(true);
   flash(`Lifted ${lifted.residues.length} residues, ${lifted.rmsd.toFixed(2)} A from your stroke.`);
 }
 
-/**
- * `addSketchBlock` canonicalises the geometry to the origin, so the block has
- * to be placed back where it was drawn.
- */
-function recentreSketchBlock(block, worldResidues) {
-  const centre = new THREE.Vector3();
-  for (const residue of worldResidues) centre.add(new THREE.Vector3(...residue.CA));
-  centre.divideScalar(worldResidues.length);
-
-  const canonicalAxis = new THREE.Vector3(0, 0, 1);
-  const first = new THREE.Vector3(...worldResidues[0].CA);
-  const last = new THREE.Vector3(...worldResidues[worldResidues.length - 1].CA);
-  const worldAxis = last.clone().sub(first).normalize();
-
-  block.quaternion = new THREE.Quaternion()
-    .setFromUnitVectors(canonicalAxis, worldAxis)
-    .toArray();
-  block.position = centre.toArray();
-}
 
 /**
  * Build a backbone shaped like the typed text.
@@ -401,10 +381,9 @@ function buildTracedShape(text) {
 
     worst = Math.max(worst, lifted.rmsd);
     residues += lifted.residues.length;
-    const block = addSketchBlock(state.assembly, lifted.residues, {
+    addSketchBlock(state.assembly, lifted.residues, {
       name: `${text} piece ${state.assembly.blocks.length + 1}`,
     });
-    recentreSketchBlock(block, lifted.residues);
   }
 
   if (!state.assembly.blocks.length) {
@@ -464,6 +443,10 @@ function importChain(chain, label) {
   state.assembly = createAssembly(`${label} chain ${chain.chainId}`);
   for (const element of elements) {
     addSketchBlock(state.assembly, element.residues, {
+      // Carry the element's own secondary structure: it decides the colour,
+      // the proxy shape, and what the exported ss tensor says this is. Left as
+      // "sketch", an imported helix would be exported as loop.
+      type: element.code === 'H' ? 'helix' : 'strand',
       name: `${element.code}${element.residues.length} ${element.start + 1}-${element.end + 1}`,
     });
   }

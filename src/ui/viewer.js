@@ -273,7 +273,7 @@ export class Viewer {
     for (const block of assembly.blocks) {
       seen.add(block.id);
       let entry = this.proxies.get(block.id);
-      const shapeKey = `${block.type}:${block.nResidues}`;
+      const shapeKey = `${block.type}:${block.nResidues}:${block.extent?.toFixed(1) ?? ''}`;
 
       if (!entry) {
         const node = new THREE.Group();
@@ -506,13 +506,18 @@ function proxyGeometry(block) {
   const n = Math.max(2, block.nResidues);
   const code = ssCodeOf(block.type);
 
+  // A block built from real coordinates knows its own length; only fall back to
+  // estimating from the residue count when it does not.
+  const rise = code === 'E' ? 3.35 : code === 'H' ? 1.5 : 2.8;
+  const length = (block.extent ?? rise * (n - 1)) + 3.5;
+
   let geometry;
   if (code === 'H') {
-    geometry = new THREE.CylinderGeometry(3.2, 3.2, 1.5 * (n - 1) + 4, 20, 1, false);
+    geometry = new THREE.CylinderGeometry(3.2, 3.2, length, 20, 1, false);
   } else if (code === 'E') {
-    geometry = new THREE.BoxGeometry(5.0, 2.4, 3.35 * (n - 1) + 3);
+    geometry = new THREE.BoxGeometry(5.0, 2.4, length);
   } else {
-    geometry = new THREE.CylinderGeometry(2.6, 2.6, 2.8 * (n - 1) + 3, 14, 1, false);
+    geometry = new THREE.CylinderGeometry(2.6, 2.6, length, 14, 1, false);
   }
 
   // Canonical blocks run along +z; cylinders are built along +y.
