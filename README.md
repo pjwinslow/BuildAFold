@@ -126,7 +126,12 @@ so nothing needs to be assumed about the stroke's absolute frame. The output is
 always a chemically valid backbone, never an interpolated ribbon that looks like one.
 
 **Validation** reports steric clashes, chain breaks, radius of gyration and
-long-range contact count. A design that fails is reported as not buildable rather
+long-range contact count. Two Ca atoms closer than 4 A, more than two residues
+apart in sequence, counts as a clash. That threshold is checked against real
+structures rather than assumed: across four deposited structures, 937 non-local
+Ca pairs fall within 6 A and only two of them are below 4 A, with the closest
+anywhere at 3.6 A. So a design that trips it is genuinely too tight, and a real
+structure almost never does. A design that fails is reported as not buildable rather
 than quietly exported.
 
 **Rendering** follows the Richardson cartoon convention: helices as flat twisted
@@ -149,6 +154,11 @@ src/model/      the assembly document and realisation
 src/io/         PDB read/write, design spec and command generation
 src/ui/         three.js viewport, cartoon ribbons, application controller
 python/         design spec -> model inputs
+tools/          dev server, site build, and diagnostics:
+                  diagnose-clashes.mjs  where an imported structure's clashes
+                                        come from, split by element and loop
+                  contact-stats.mjs     Ca-Ca distance distribution of real
+                                        structures, used to set the threshold
 ```
 
 ## Tests
@@ -181,6 +191,17 @@ format specifies.
   served inside a sandboxed frame cannot. The fetch path here is covered by
   tests against mocked responses; it has never been run against the real
   archives from this build environment.
+- **Imported loops are rebuilt, not imported.** Only the helices and strands
+  come in; the loops between them are regenerated so the pieces can be moved
+  apart and stay connected. Each is rebuilt at the length the original used,
+  which is usually enough to reproduce a clash-free chain: of four real
+  structures tested, three import with no clashes at all. The exception is long
+  loops in a crowded protein — a 566-residue structure with 35 elements and
+  loops of up to 30 residues imports with about 50 clashes, nearly all of them
+  loop-against-element, because there is no clear route through the interior.
+  A clash inside an imported structure is therefore a loop that was rebuilt,
+  not a flaw in the deposited coordinates; the import message says how many of
+  each.
 - **Imported structures are backbone only.** Side chains, ligands, waters and
   alternate conformations are dropped, and only the first model of an NMR
   ensemble is read.

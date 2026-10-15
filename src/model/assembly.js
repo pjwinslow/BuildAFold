@@ -15,7 +15,7 @@ import { canonicalize, placeBlock } from '../geometry/frame.js';
 import { superpose } from '../geometry/kabsch.js';
 import { closeLoop, closureFeasibility } from '../geometry/ccd.js';
 import { validateChain } from '../geometry/validate.js';
-import { COMFORTABLE_SPAN_PER_RESIDUE, SS3, SS_PRESETS } from '../geometry/constants.js';
+import { BOND, COMFORTABLE_SPAN_PER_RESIDUE, SS3, SS_PRESETS } from '../geometry/constants.js';
 import { distance } from '../geometry/vec3.js';
 
 let nextId = 1;
@@ -255,13 +255,23 @@ export function realize(assembly, options = {}) {
           : Math.max(0, Math.round(requested));
 
       if (nLinker === 0) {
+        // Two elements can be directly bonded with nothing in between — a helix
+        // running straight into a strand, which is common in real structures and
+        // is how they import. Whether that is a problem depends on the geometry,
+        // not on the absence of a linker: if the peptide bond is already the
+        // right length, the junction is correct and there is nothing to close.
+        const bond = distance(prev.C, next.N);
+        const joined = Math.abs(bond - BOND.C_N) <= 0.1;
         closures.push({
           blockId: entry.block.id,
           nResidues: 0,
-          converged: false,
-          rmsd: Number.POSITIVE_INFINITY,
+          converged: joined,
+          rmsd: joined ? 0 : bond,
           feasibility: closureFeasibility(prev, next, 0),
-          note: 'Direct junction: blocks are joined with no linker residues.',
+          note: joined
+            ? 'Directly bonded: these elements join with no linker.'
+            : `Direct junction, but the ends are ${bond.toFixed(1)} A apart ` +
+              '— add linker residues or move the blocks together.',
         });
       } else {
         const loopStart = residues.length;

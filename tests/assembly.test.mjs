@@ -232,3 +232,40 @@ test('blocks can be reordered and removed', () => {
   assert.equal(assembly.blocks.length, 1);
   assert.equal(realize(assembly).closures.length, 0);
 });
+
+test('directly bonded blocks need no linker and are not an error', () => {
+  // Two elements can run straight into each other with no loop between them,
+  // which is common in real structures and is how they import. Previously any
+  // zero-length linker was reported as unclosed, so such a design could never
+  // be buildable.
+  resetIds();
+  const source = createAssembly('continuous');
+  addBlock(source, { type: 'helix', nResidues: 20, position: [0, 0, 0] });
+  const chain = realize(source).residues;
+
+  // Split that one helix into two halves and rejoin them with no linker.
+  resetIds();
+  const split = createAssembly('split');
+  addSketchBlock(split, chain.slice(0, 10), { type: 'helix' });
+  addSketchBlock(split, chain.slice(10), { type: 'helix', linkerBefore: 0 });
+
+  const result = realize(split);
+  assert.equal(result.closures.length, 1);
+  assert.equal(result.closures[0].nResidues, 0);
+  assert.equal(result.closures[0].converged, true, 'an intact peptide bond is closed');
+  assert.equal(result.validation.breaks.length, 0);
+  assert.equal(result.ok, true, 'a directly bonded pair must not read as unbuildable');
+  assert.equal(result.residues.length, 20);
+});
+
+test('a direct junction with a gap still reports the gap', () => {
+  resetIds();
+  const assembly = createAssembly('gapped');
+  addBlock(assembly, { type: 'helix', nResidues: 10, position: [0, 0, 0] });
+  addBlock(assembly, { type: 'helix', nResidues: 10, position: [30, 0, 0], linkerBefore: 0 });
+
+  const result = realize(assembly);
+  assert.equal(result.closures[0].converged, false);
+  assert.equal(result.ok, false);
+  assert.match(result.closures[0].note, /apart/);
+});

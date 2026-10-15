@@ -26,7 +26,8 @@ import { writePDB } from '../io/pdb.js';
 import { buildDesignSpec, pipelineCommands, describeSpec } from '../io/designspec.js';
 import { Viewer } from './viewer.js';
 import { textToPaths, textToStrandBlocks, textToStrokeBlocks } from './shapes.js';
-import { fetchStructure, parseStructure, chainToElements } from '../io/structures.js';
+import { fetchStructure, parseStructure, assemblyFromChain } from '../io/structures.js';
+import { findClashes } from '../geometry/validate.js';
 
 const SPACING = { helix: 10.5, helix310: 9.5, strand: 4.9, strandPar: 4.9, sketch: 8 };
 
@@ -434,22 +435,15 @@ async function loadStructureText(text, label) {
 }
 
 function importChain(chain, label) {
-  const elements = chainToElements(chain);
+  const { assembly, elements } = assemblyFromChain(chain, {
+    name: `${label} chain ${chain.chainId}`,
+  });
   if (!elements.length) {
     return flash(`Chain ${chain.chainId} has no helices or strands long enough to import.`);
   }
 
   snapshot();
-  state.assembly = createAssembly(`${label} chain ${chain.chainId}`);
-  for (const element of elements) {
-    addSketchBlock(state.assembly, element.residues, {
-      // Carry the element's own secondary structure: it decides the colour,
-      // the proxy shape, and what the exported ss tensor says this is. Left as
-      // "sketch", an imported helix would be exported as loop.
-      type: element.code === 'H' ? 'helix' : 'strand',
-      name: `${element.code}${element.residues.length} ${element.start + 1}-${element.end + 1}`,
-    });
-  }
+  state.assembly = assembly;
 
   select(null);
   viewer.syncBlocks(state.assembly);
@@ -458,9 +452,22 @@ function importChain(chain, label) {
 
   const helices = elements.filter((e) => e.code === 'H').length;
   const strands = elements.length - helices;
+
+  // Loops are rebuilt rather than imported, so any clash is either one the
+  // deposited structure already had or one the rebuilt loops introduced.
+  // Saying which is which saves the user wondering whether a real protein is
+  // somehow broken.
+  const native = findClashes(chain.residues).length;
+  const now = state.realized?.validation?.clashes.length ?? 0;
+  const introduced = Math.max(0, now - native);
+
   flash(
     `${label} chain ${chain.chainId}: ${helices} helices, ${strands} strands ` +
-      `(${chain.source === 'records' ? 'from the file' : 'assigned from geometry'}).`,
+      `(${chain.source === 'records' ? 'from the file' : 'assigned from geometry'}). ` +
+      (now === 0
+        ? 'No clashes.'
+        : `${now} clashes — ${native} already in the structure, ` +
+          `${introduced} from the rebuilt loops.`),
   );
 }
 

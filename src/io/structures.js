@@ -10,6 +10,7 @@
 import { parsePDB, parseSecondaryStructureRecords } from './pdb.js';
 import { assignSecondaryStructure, secondaryStructureRuns } from '../geometry/ssassign.js';
 import { completeResidue } from '../geometry/chain.js';
+import { createAssembly, addSketchBlock } from '../model/assembly.js';
 
 const RCSB = 'https://files.rcsb.org/download';
 const ALPHAFOLD = 'https://alphafold.ebi.ac.uk/files';
@@ -152,9 +153,50 @@ export function chainToElements(chain, options = {}) {
         psi: 0,
       }));
 
-    elements.push({ code: run.code, residues, start: run.start, end: run.end });
+    // How many residues the original put between this element and the last one
+    // we kept. Rebuilding a loop at its real length matters: sized only by the
+    // distance it has to span, an auto linker comes out roughly twice as long
+    // as the loop it replaces, and the slack has to go somewhere -- usually
+    // straight through the structure.
+    const previous = elements[elements.length - 1];
+    const gapBefore = previous ? run.start - previous.end - 1 : null;
+
+    elements.push({ code: run.code, residues, start: run.start, end: run.end, gapBefore });
     if (elements.length >= maxBlocks) break;
   }
 
   return elements;
+}
+
+/**
+ * Build an assembly from one parsed chain.
+ *
+ * Kept here, rather than in the interface, so that the application, the tests
+ * and the diagnostics all import a structure the same way. The loop lengths in
+ * particular are easy to get wrong in one caller and right in another, and the
+ * difference does not show up until something clashes.
+ *
+ * @param {object} chain from `parseStructure`
+ * @param {{name?: string}} [options] remaining options go to `chainToElements`
+ * @returns {{assembly: object, elements: Array}}
+ */
+export function assemblyFromChain(chain, options = {}) {
+  const { name, ...elementOptions } = options;
+  const elements = chainToElements(chain, elementOptions);
+  const assembly = createAssembly(name ?? `chain ${chain.chainId}`);
+
+  for (const element of elements) {
+    addSketchBlock(assembly, element.residues, {
+      // The element's own secondary structure decides its colour, its proxy
+      // shape, and what the exported ss tensor says it is.
+      type: element.code === 'H' ? 'helix' : 'strand',
+      // Rebuild each loop at the length the original used. Sized from the gap
+      // alone an auto linker comes out roughly twice as long as the loop it
+      // replaces, and that slack goes straight through the structure.
+      linkerBefore: element.gapBefore ?? 'auto',
+      name: `${element.code}${element.residues.length} ${element.start + 1}-${element.end + 1}`,
+    });
+  }
+
+  return { assembly, elements };
 }

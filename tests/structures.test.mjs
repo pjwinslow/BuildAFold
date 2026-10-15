@@ -7,6 +7,7 @@ import {
   parseStructure,
   chainToElements,
   chainSecondaryStructure,
+  assemblyFromChain,
 } from '../src/io/structures.js';
 import { writePDB, parseSecondaryStructureRecords } from '../src/io/pdb.js';
 import {
@@ -231,4 +232,50 @@ test('a sketch block round-trips through its own placement', () => {
       `residue ${i} moved ${distance(rebuilt[i].CA, placed[i].CA).toFixed(2)} A on import`,
     );
   }
+});
+
+test('imported loops are rebuilt at the length the original used', () => {
+  // Loops sized from the gap alone come out roughly twice as long as the loop
+  // they replace, and the slack routes straight through the structure. A real
+  // 51-residue chain went from six clashes to none once the real lengths were
+  // used.
+  resetIds();
+  const source = createAssembly('three helices');
+  addBlock(source, { type: 'helix', nResidues: 12, position: [0, 0, 0] });
+  addBlock(source, { type: 'helix', nResidues: 12, position: [10.5, 0, 0], quaternion: [1, 0, 0, 0], linkerBefore: 4 });
+  addBlock(source, { type: 'helix', nResidues: 12, position: [21, 0, 0], linkerBefore: 3 });
+  const built = realize(source);
+
+  const text = writePDB(built.residues, { segments: built.segments });
+  const [chain] = parseStructure(text);
+  const { assembly, elements } = assemblyFromChain(chain);
+
+  assert.equal(elements.length, 3);
+  // Each element after the first asks for exactly the loop the file contained.
+  assert.deepEqual(
+    elements.slice(1).map((e) => e.gapBefore),
+    [4, 3],
+  );
+  assert.deepEqual(
+    assembly.blocks.slice(1).map((b) => b.linkerBefore),
+    [4, 3],
+  );
+
+  const rebuilt = realize(assembly);
+  assert.deepEqual(rebuilt.closures.map((c) => c.nResidues), [4, 3]);
+  assert.equal(rebuilt.residues.length, built.residues.length);
+  assert.equal(
+    rebuilt.validation.clashes.length,
+    0,
+    'rebuilding at the real loop lengths should reproduce a clash-free chain',
+  );
+});
+
+test('the first element carries no loop length', () => {
+  resetIds();
+  const source = createAssembly('one');
+  addBlock(source, { type: 'helix', nResidues: 12, position: [0, 0, 0] });
+  const text = writePDB(realize(source).residues, { segments: realize(source).segments });
+  const { elements } = assemblyFromChain(parseStructure(text)[0]);
+  assert.equal(elements[0].gapBefore, null);
 });
