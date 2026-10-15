@@ -643,3 +643,10 @@ h2 {
 .shape-form select {
   min-width: 0;
 }
+
+.build {
+  color: var(--line);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}

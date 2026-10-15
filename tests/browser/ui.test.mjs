@@ -700,3 +700,20 @@ test('the whole left panel scrolls, so the chain list stays reachable', async ()
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('the page reports which build it is running', async () => {
+  // A stale cached copy and a fix that did not work look identical from the
+  // outside; the build id is what tells them apart.
+  const { page, errors } = await openApp();
+
+  const stamped = await page.evaluate(() => document.body.dataset.build ?? null);
+  if (stamped) {
+    assert.match(await page.locator('#build-id').textContent(), /build \w+/);
+  } else {
+    // Served unbuilt (straight from the repo), so there is nothing to show.
+    assert.equal(await page.locator('#build-id').textContent(), '');
+  }
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});

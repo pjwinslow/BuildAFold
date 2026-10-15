@@ -195,6 +195,16 @@ format specifies.
 - three.js loads from a CDN, so the page needs network access on first load. If it
   cannot be reached, the page says so rather than showing an empty viewport.
 
+## Which build am I looking at?
+
+The header shows a build id, and `build.json` carries the same one. GitHub
+Pages serves static files with a cache lifetime and gives no way to set
+headers, so a browser will happily keep running a previous deploy — which from
+the outside is indistinguishable from a fix that did not work. Every asset URL
+is therefore stamped with the build id at deploy time, so a new deploy is a new
+URL. If the id in the header does not match the latest commit, the page is
+cached; everything else is a real bug.
+
 ## Deploying
 
 The app is static. `.github/workflows/pages.yml` runs the tests, assembles `_site/`

@@ -1051,6 +1051,14 @@ function loadExample() {
   viewer.recentre(state.realized);
 }
 
+// Surface which build is running. Without it, a stale cached copy and a broken
+// fix look exactly the same from the outside.
+const buildId = document.body.dataset.build;
+if (buildId) {
+  const label = document.getElementById('build-id');
+  if (label) label.textContent = `build ${buildId}`;
+}
+
 renderPalette();
 loadExample();
 setMode('translate');
