@@ -36,6 +36,7 @@ Or just use the [hosted copy](https://pjwinslow.github.io/BuildAFold/).
 | **Move / Rotate** (`G` / `R`) | drag the gizmo on the selected block |
 | **Sketch** (`D`) | drag in the viewport to draw a backbone path |
 | **Shape** panel | type a word and build a backbone shaped like it |
+| **Fetch structure** panel | pull a PDB entry or AlphaFold model in as editable blocks |
 | **Clashes** toggle | red markers in the viewport at every steric overlap |
 | **Pack** | align the selection antiparallel to the previous block, at contact distance |
 | **Snap** | 1 Å translation, 15° rotation |
@@ -103,6 +104,16 @@ cleanly, but needed two dozen of them per character and buried the letter in
 turns. Both are still available in the Shape panel as "Filled sheet" and
 "Traced outline"; neither is the default.
 
+**Existing structures** are fetched by PDB ID (from RCSB) or UniProt accession
+(from AlphaFold), or opened from a local file. Each helix and strand becomes a
+block that keeps the structure's own coordinates — a helix from a crystal
+structure is not an ideal helix, and the point of importing one is to build
+against the real thing. Loops are left out and rebuilt as linkers, which is
+what lets the imported pieces be pulled apart and still stay connected.
+Secondary structure comes from the file's HELIX and SHEET records when it has
+them, and is otherwise assigned from the virtual bond angles and dihedrals of
+the Cα trace, since predicted models carry no records at all.
+
 **Clashes** are marked in place, as red spheres at the midpoint of each
 offending pair, sized by how deep the overlap runs. A count in a panel says
 something is wrong; a marker says where.
@@ -165,6 +176,14 @@ format specifies.
   They are marked in red so they are easy to find and fix by hand, and partial
   diffusion would rebuild those turns anyway. Treat the output as a scaffold to
   regularise rather than a finished backbone.
+- **Fetching needs network access from the browser.** RCSB and AlphaFold both
+  allow cross-origin requests, so the live site can reach them, but a page
+  served inside a sandboxed frame cannot. The fetch path here is covered by
+  tests against mocked responses; it has never been run against the real
+  archives from this build environment.
+- **Imported structures are backbone only.** Side chains, ligands, waters and
+  alternate conformations are dropped, and only the first model of an NMR
+  ensemble is read.
 - **Sketch depth is not inferred.** A stroke is projected onto the plane facing the
   camera; depth comes from orbiting and redrawing.
 - **No β-sheet registry.** Strands can be placed side by side, but they are not

@@ -545,3 +545,116 @@ test('clashes are listed and can be hidden', async () => {
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+/** A small two-helix PDB, used to stand in for a fetched entry. */
+function samplePdb() {
+  const lines = [
+    'HELIX    1   1 GLY A    1  GLY A   12  1                                  12',
+    'HELIX    2   2 GLY A   19  GLY A   30  1                                  12',
+  ];
+  let serial = 1;
+  // Two ideal-ish helices, offset, with a short connecting stretch.
+  for (let i = 0; i < 30; i += 1) {
+    const t = i * 1.75;
+    const arm = i < 12 ? 0 : i < 18 ? 1 : 2;
+    const cx = arm === 2 ? 11 : 0;
+    const base = [Math.cos(t) * 2.3 + cx, Math.sin(t) * 2.3, i * 1.5];
+    for (const [name, dx] of [['N', -0.6], ['CA', 0], ['C', 0.6], ['O', 0.9]]) {
+      const x = (base[0] + dx).toFixed(3).padStart(8);
+      const y = base[1].toFixed(3).padStart(8);
+      const z = base[2].toFixed(3).padStart(8);
+      lines.push(
+        'ATOM  ' + String(serial++).padStart(5) + ' ' +
+        (name.length < 4 ? ` ${name}`.padEnd(4) : name) + ' GLY A' +
+        String(i + 1).padStart(4) + '    ' + x + y + z + '  1.00  0.00           ' +
+        name[0].padStart(2),
+      );
+    }
+  }
+  lines.push('END');
+  return lines.join('\n');
+}
+
+test('fetching a PDB imports its elements as editable blocks', async () => {
+  const { page, errors } = await openApp();
+
+  let requested = null;
+  await page.route('**/files.rcsb.org/**', (route) => {
+    requested = route.request().url();
+    return route.fulfill({
+      status: 200,
+      contentType: 'text/plain',
+      headers: { 'access-control-allow-origin': '*' },
+      body: samplePdb(),
+    });
+  });
+
+  await page.locator('#pdb-id').fill('1CRN');
+  await page.locator('#pdb-fetch').click();
+  await page.waitForFunction(
+    () => /chain A/.test(document.querySelector('#readout').textContent),
+    null,
+    { timeout: 60000 },
+  );
+
+  assert.match(requested, /files\.rcsb\.org\/download\/1CRN\.pdb$/);
+
+  // The two helices arrive as blocks that can be selected and deleted.
+  const blocks = await page.locator('#chain-list li').count();
+  assert.equal(blocks, 2, `expected two imported helices, got ${blocks}`);
+  assert.equal(await page.locator('#chain-list li .row-delete').count(), 2);
+
+  // The chain picker is populated.
+  assert.ok(await page.locator('#pdb-chain').isEnabled());
+  assert.equal(await page.locator('#pdb-chain option').count(), 1);
+
+  // And they can be built onto: adding a helix extends the same chain.
+  await page.locator('#palette button').first().click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 3);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('a failed fetch says what went wrong', async () => {
+  const { page, errors } = await openApp();
+  await page.route('**/files.rcsb.org/**', (route) => route.fulfill({ status: 404, body: '' }));
+
+  await page.locator('#pdb-id').fill('9ZZZ');
+  await page.locator('#pdb-fetch').click();
+  await page.waitForFunction(
+    () => /no entry 9ZZZ/i.test(document.querySelector('#readout').textContent),
+    null,
+    { timeout: 60000 },
+  );
+
+  // The design is untouched by a failed fetch.
+  assert.equal(await page.locator('#chain-list li').count(), 4);
+  assert.ok(await page.locator('#pdb-fetch').isEnabled(), 'the button must not stay disabled');
+
+  // The browser logs the 404 itself; that is expected here. Anything else is not.
+  const unexpected = errors.filter((message) => !/404|Failed to load resource/i.test(message));
+  assert.deepEqual(unexpected, []);
+  await page.close();
+});
+
+test('a bad identifier is rejected before any request', async () => {
+  const { page, errors } = await openApp();
+  let called = false;
+  await page.route('**/files.rcsb.org/**', (route) => {
+    called = true;
+    return route.fulfill({ status: 200, body: '' });
+  });
+
+  await page.locator('#pdb-id').fill('not-an-id');
+  await page.locator('#pdb-fetch').click();
+  await page.waitForFunction(
+    () => /PDB ID|UniProt/.test(document.querySelector('#readout').textContent),
+    null,
+    { timeout: 30000 },
+  );
+  assert.equal(called, false, 'nothing should be requested for a malformed id');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});

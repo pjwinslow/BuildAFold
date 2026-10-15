@@ -26,6 +26,7 @@ import { writePDB } from '../io/pdb.js';
 import { buildDesignSpec, pipelineCommands, describeSpec } from '../io/designspec.js';
 import { Viewer } from './viewer.js';
 import { textToPaths, textToStrandBlocks, textToStrokeBlocks } from './shapes.js';
+import { fetchStructure, parseStructure, chainToElements } from '../io/structures.js';
 
 const SPACING = { helix: 10.5, helix310: 9.5, strand: 4.9, strandPar: 4.9, sketch: 8 };
 
@@ -415,6 +416,87 @@ function buildTracedShape(text) {
     `Traced "${text}": ${state.assembly.blocks.length} pieces, ${residues} residues, ` +
     `within ${worst.toFixed(1)} A of the outline.`
   );
+}
+
+// ------------------------------------------------------------ structure import
+
+/** Chains from the most recently loaded structure, keyed for the chain picker. */
+let loadedChains = [];
+
+/**
+ * Load a structure and offer its chains.
+ *
+ * Importing turns each helix and strand into a block that keeps its real
+ * coordinates, so an imported element is the structure's own geometry rather
+ * than an idealised stand-in. Loops are left out and rebuilt as linkers, which
+ * is what lets the pieces be pulled apart and stay connected.
+ */
+async function loadStructureText(text, label) {
+  let chains;
+  try {
+    chains = parseStructure(text);
+  } catch (error) {
+    return flash(`Could not read that structure: ${error.message}`);
+  }
+  if (!chains.length) return flash('No backbone found in that file.');
+
+  loadedChains = chains;
+  const picker = document.getElementById('pdb-chain');
+  picker.innerHTML = '';
+  for (const chain of chains) {
+    const option = document.createElement('option');
+    option.value = chain.chainId;
+    option.textContent = `${chain.chainId} (${chain.residues.length} aa)`;
+    picker.appendChild(option);
+  }
+  picker.disabled = false;
+
+  importChain(chains[0], label);
+}
+
+function importChain(chain, label) {
+  const elements = chainToElements(chain);
+  if (!elements.length) {
+    return flash(`Chain ${chain.chainId} has no helices or strands long enough to import.`);
+  }
+
+  snapshot();
+  state.assembly = createAssembly(`${label} chain ${chain.chainId}`);
+  for (const element of elements) {
+    addSketchBlock(state.assembly, element.residues, {
+      name: `${element.code}${element.residues.length} ${element.start + 1}-${element.end + 1}`,
+    });
+  }
+
+  select(null);
+  viewer.syncBlocks(state.assembly);
+  scheduleRealize(true);
+  viewer.recentre(state.realized);
+
+  const helices = elements.filter((e) => e.code === 'H').length;
+  const strands = elements.length - helices;
+  flash(
+    `${label} chain ${chain.chainId}: ${helices} helices, ${strands} strands ` +
+      `(${chain.source === 'records' ? 'from the file' : 'assigned from geometry'}).`,
+  );
+}
+
+async function fetchStructureById() {
+  const input = document.getElementById('pdb-id');
+  const button = document.getElementById('pdb-fetch');
+  const id = input.value.trim();
+  if (!id) return flash('Enter a PDB ID or UniProt accession.');
+
+  button.disabled = true;
+  flash(`Fetching ${id.toUpperCase()}…`);
+  try {
+    const result = await fetchStructure(id);
+    await loadStructureText(result.text, result.id);
+  } catch (error) {
+    flash(`${error.message}.`);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function deleteBlock(id) {
@@ -898,6 +980,22 @@ document.getElementById('export-spec').addEventListener('click', exportSpec);
 document.getElementById('load-example').addEventListener('click', () => loadExample());
 document.getElementById('reset').addEventListener('click', resetAll);
 document.getElementById('shape-build').addEventListener('click', buildShape);
+document.getElementById('pdb-fetch').addEventListener('click', fetchStructureById);
+document.getElementById('pdb-id').addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') fetchStructureById();
+});
+document.getElementById('pdb-chain').addEventListener('change', (event) => {
+  const chain = loadedChains.find((c) => c.chainId === event.target.value);
+  if (chain) importChain(chain, state.assembly.name.split(' chain ')[0] || 'Structure');
+});
+document.getElementById('pdb-file-open').addEventListener('click', () => {
+  document.getElementById('pdb-file').click();
+});
+document.getElementById('pdb-file').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  if (file) await loadStructureText(await file.text(), file.name.replace(/\.[^.]+$/, ''));
+  event.target.value = '';
+});
 document.getElementById('shape-text').addEventListener('keydown', (event) => {
   if (event.key === 'Enter') buildShape();
 });

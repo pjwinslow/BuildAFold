@@ -80,6 +80,24 @@
           </div>
         </section>
 
+        <section>
+          <h2>Fetch structure</h2>
+          <p class="hint">PDB ID or UniProt accession. Imported elements become
+            blocks you can move, delete and build onto.</p>
+          <div class="shape-form">
+            <input id="pdb-id" type="text" value="1CRN" maxlength="24"
+                   placeholder="1CRN or P69905" aria-label="PDB ID" />
+            <button id="pdb-fetch">Fetch</button>
+            <label class="shape-size">
+              <span>Chain</span>
+              <select id="pdb-chain" aria-label="Chain" disabled>
+                <option value="">—</option>
+              </select>
+              <button id="pdb-file-open" class="link-button" type="button">or open a file…</button>
+            </label>
+          </div>
+        </section>
+
         <section class="grow">
           <h2>Chain order</h2>
           <p class="hint">N-terminus at the top. Drag to reorder.</p>
@@ -143,6 +161,7 @@
     </main>
 
     <input type="file" id="file-input" accept=".json" hidden />
+    <input type="file" id="pdb-file" accept=".pdb,.ent,.txt" hidden />
     <script type="module" src="src/ui/app.js"></script>
 
     <script>

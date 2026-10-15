@@ -256,3 +256,38 @@ export function parsePDB(text) {
   }
   return { chains: out };
 }
+
+/**
+ * HELIX and SHEET records, when a file carries them.
+ *
+ * Preferred over computing secondary structure where present: these are the
+ * depositor's own assignment, usually from DSSP with the full atom set. Many
+ * files omit them and predicted models essentially never have them, so this
+ * returns what it finds and the caller falls back to assignment.
+ *
+ * @returns {{helices: Array, sheets: Array}} ranges as `{chainId, start, end}`
+ */
+export function parseSecondaryStructureRecords(text) {
+  const helices = [];
+  const sheets = [];
+
+  for (const line of text.split(/\r?\n/)) {
+    if (line.startsWith('HELIX ')) {
+      const chainId = line[19] === ' ' ? 'A' : line[19];
+      const start = Number.parseInt(line.slice(21, 25), 10);
+      const end = Number.parseInt(line.slice(33, 37), 10);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        helices.push({ chainId, start, end });
+      }
+    } else if (line.startsWith('SHEET ')) {
+      const chainId = line[21] === ' ' ? 'A' : line[21];
+      const start = Number.parseInt(line.slice(22, 26), 10);
+      const end = Number.parseInt(line.slice(33, 37), 10);
+      if (Number.isFinite(start) && Number.isFinite(end)) {
+        sheets.push({ chainId, start, end });
+      }
+    }
+  }
+
+  return { helices, sheets };
+}

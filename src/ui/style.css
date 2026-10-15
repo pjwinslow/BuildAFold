@@ -620,3 +620,21 @@ h2 {
   list-style: none;
   margin-left: -16px;
 }
+
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: auto;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 11px;
+}
+.link-button:hover {
+  background: none;
+  border-color: transparent;
+}
+.shape-form select {
+  min-width: 0;
+}
