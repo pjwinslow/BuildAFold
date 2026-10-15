@@ -19,6 +19,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
 
 import { buildRibbon, flatProfile, arrowProfile } from './ribbon.js';
+import { transformAbout } from '../geometry/frame.js';
 
 const COLORS = {
   helix: 0xe05f6a,
@@ -42,7 +43,6 @@ export class Viewer {
     this.drawing = false;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x0f1115);
 
     this.camera = new THREE.PerspectiveCamera(45, 1, 0.5, 2000);
     this.camera.position.set(42, 28, 48);
@@ -51,7 +51,8 @@ export class Viewer {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(this.renderer.domElement);
 
-    this.scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    this.ambient = new THREE.AmbientLight(0xffffff, 0.55);
+    this.scene.add(this.ambient);
     const key = new THREE.DirectionalLight(0xffffff, 1.5);
     key.position.set(30, 50, 40);
     this.scene.add(key);
@@ -59,9 +60,8 @@ export class Viewer {
     fill.position.set(-40, -20, -30);
     this.scene.add(fill);
 
-    const grid = new THREE.GridHelper(120, 24, 0x2a2f3a, 0x1d212a);
-    grid.position.y = -24;
-    this.scene.add(grid);
+    this.grid = null;
+    this.applyTheme();
 
     this.orbit = new OrbitControls(this.camera, this.renderer.domElement);
     this.orbit.enableDamping = true;
@@ -77,9 +77,17 @@ export class Viewer {
 
     this.gizmo.addEventListener('dragging-changed', (event) => {
       this.orbit.enabled = !event.value;
+      if (this.groupMode) {
+        if (event.value) this.beginGroupDrag();
+        else this.emitGroupTransform(false);
+        return;
+      }
       if (!event.value) this.emitTransform();
     });
-    this.gizmo.addEventListener('objectChange', () => this.emitTransform(true));
+    this.gizmo.addEventListener('objectChange', () => {
+      if (this.groupMode) this.emitGroupTransform(true);
+      else this.emitTransform(true);
+    });
 
     this.chainGroup = new THREE.Group();
     this.scene.add(this.chainGroup);
@@ -109,6 +117,115 @@ export class Viewer {
     this.renderer.setAnimationLoop(this.animate);
   }
 
+  /**
+   * Take the viewport's colours from the page.
+   *
+   * The scene is part of the interface, so it has to follow the theme — a
+   * black rectangle in the middle of a light page looks broken. Values come
+   * from the same CSS tokens the panels use, so there is one definition of
+   * each colour rather than two that can drift apart.
+   */
+  applyTheme() {
+    const styles = getComputedStyle(document.documentElement);
+    const token = (name, fallback) => {
+      const value = styles.getPropertyValue(name).trim();
+      return value || fallback;
+    };
+
+    this.scene.background = new THREE.Color(token('--viewport-bg', '#0f1115'));
+    this.ambient.intensity = Number(token('--ambient', '0.55')) || 0.55;
+
+    // GridHelper bakes its colours into vertex data, so it is rebuilt rather
+    // than recoloured.
+    if (this.grid) {
+      this.grid.geometry?.dispose();
+      this.grid.material?.dispose();
+      this.scene.remove(this.grid);
+    }
+    this.grid = new THREE.GridHelper(
+      120,
+      24,
+      new THREE.Color(token('--grid', '#2a2f3a')),
+      new THREE.Color(token('--grid-centre', '#1d212a')),
+    );
+    this.grid.position.y = -24;
+    this.scene.add(this.grid);
+  }
+
+  // --------------------------------------------------------- whole assembly
+
+  /**
+   * Move or rotate everything at once.
+   *
+   * The gizmo drives an invisible pivot at the centre of the design; each
+   * block then takes the pivot's change in transform applied about that
+   * centre. Composing it this way means a rotation turns the whole assembly
+   * as one rigid body rather than spinning each block on its own axis.
+   */
+  setGroupMode(enabled) {
+    this.groupMode = enabled;
+
+    if (!enabled) {
+      if (this.pivot) this.gizmo.detach();
+      this.setSelection(this.selectedId);
+      return;
+    }
+
+    if (!this.pivot) {
+      this.pivot = new THREE.Object3D();
+      this.scene.add(this.pivot);
+    }
+    this.pivot.position.copy(this.assemblyCentre());
+    this.pivot.quaternion.set(0, 0, 0, 1);
+    this.groupStart = null;
+    if (this.mode !== 'sketch') this.gizmo.attach(this.pivot);
+  }
+
+  assemblyCentre() {
+    const centre = new THREE.Vector3();
+    let count = 0;
+    for (const entry of this.proxies.values()) {
+      centre.add(entry.node.position);
+      count += 1;
+    }
+    return count ? centre.divideScalar(count) : centre;
+  }
+
+  /** Snapshot where everything was when a group drag began. */
+  beginGroupDrag() {
+    this.groupStart = {
+      position: this.pivot.position.toArray(),
+      quaternion: this.pivot.quaternion.toArray(),
+      blocks: [...this.proxies].map(([id, entry]) => ({
+        id,
+        position: entry.node.position.toArray(),
+        quaternion: entry.node.quaternion.toArray(),
+      })),
+    };
+  }
+
+  /**
+   * Apply the pivot's movement to every block, about where the pivot started.
+   *
+   * The composition itself lives in the geometry layer, where it is unit
+   * tested: a rotation applied per block instead of about a common centre
+   * would quietly deform the design rather than turn it.
+   */
+  emitGroupTransform(live) {
+    if (!this.groupStart) return;
+
+    const moved = transformAbout(
+      this.groupStart.blocks,
+      { position: this.groupStart.position, quaternion: this.groupStart.quaternion },
+      {
+        position: this.pivot.position.toArray(),
+        quaternion: this.pivot.quaternion.toArray(),
+      },
+    );
+
+    this.handlers.onGroupTransform?.(moved, live);
+  }
+
   animate() {
     this.orbit.update();
     this.renderer.render(this.scene, this.camera);
@@ -130,6 +247,9 @@ export class Viewer {
     this.mode = mode;
     if (mode === 'sketch') {
       this.gizmo.detach();
+    } else if (this.groupMode) {
+      this.gizmo.setMode(mode);
+      if (this.pivot) this.gizmo.attach(this.pivot);
     } else {
       this.gizmo.setMode(mode);
       if (this.selectedId && this.proxies.has(this.selectedId)) {
@@ -321,6 +441,8 @@ export class Viewer {
       entry.mesh.material.opacity = selected ? 0.34 : 0.16;
       entry.mesh.material.emissive?.setHex(selected ? 0x223344 : 0x000000);
     }
+
+    if (this.groupMode) return; // the gizmo stays on the whole assembly
 
     if (blockId && this.proxies.has(blockId) && this.mode !== 'sketch') {
       this.gizmo.attach(this.proxies.get(blockId).node);

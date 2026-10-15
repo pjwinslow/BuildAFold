@@ -129,3 +129,47 @@ function normalize4(q) {
 export function placeBlock(canonicalResidues, position, quaternion) {
   return transformResidues(canonicalResidues, quaternionToMatrix(quaternion), position);
 }
+
+/** Hamilton product of two quaternions, each `[x, y, z, w]`. */
+export function quaternionMultiply(a, b) {
+  return [
+    a[3] * b[0] + a[0] * b[3] + a[1] * b[2] - a[2] * b[1],
+    a[3] * b[1] + a[1] * b[3] + a[2] * b[0] - a[0] * b[2],
+    a[3] * b[2] + a[2] * b[3] + a[0] * b[1] - a[1] * b[0],
+    a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2],
+  ];
+}
+
+/** Inverse of a unit quaternion: the same rotation, backwards. */
+export function quaternionInvert(q) {
+  return [-q[0], -q[1], -q[2], q[3]];
+}
+
+/** Rotate a vector by a quaternion. */
+export function rotateByQuaternion(v, q) {
+  return matVec(quaternionToMatrix(q), v);
+}
+
+/**
+ * Move a set of placements rigidly, as one body.
+ *
+ * Used when the whole design is dragged at once: the handle's change in
+ * transform is applied to every block about the handle's starting point, so
+ * the assembly turns as a single object rather than each block spinning on its
+ * own axis. Translation alone would be a subtraction; it is the rotation that
+ * has to be composed about a common centre.
+ *
+ * @param {Array<{id?: string, position: number[], quaternion: number[]}>} blocks
+ * @param {{position: number[], quaternion: number[]}} from the handle before
+ * @param {{position: number[], quaternion: number[]}} to the handle after
+ * @returns {Array} the same blocks with updated placements
+ */
+export function transformAbout(blocks, from, to) {
+  const delta = quaternionMultiply(to.quaternion, quaternionInvert(from.quaternion));
+
+  return blocks.map((block) => ({
+    ...block,
+    position: add(rotateByQuaternion(sub(block.position, from.position), delta), to.position),
+    quaternion: quaternionMultiply(delta, block.quaternion),
+  }));
+}

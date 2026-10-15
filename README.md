@@ -40,6 +40,8 @@ npm run serve        # → http://localhost:8173
 | **Fetch structure** panel | pull in a PDB entry or AlphaFold model as editable blocks |
 | **Clashes** toggle | red markers wherever things overlap |
 | **Pack** | snap the selection against the previous block at contact distance |
+| **Move all** (`A`) | move and rotate the whole design as one rigid body |
+| **Light / Dark** | follows your system until you pick one, then remembers it |
 | **Undo** (`Ctrl/Cmd-Z`), **Reset** | a whole slider drag counts as one step |
 | **Chain order** panel | drag to reorder, `×` to delete, set linker lengths or leave them `auto` |
 

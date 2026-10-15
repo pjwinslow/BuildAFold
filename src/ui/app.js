@@ -62,7 +62,60 @@ const viewer = new Viewer(dom.viewport, {
     scheduleRealize(!live);
   },
   onSketch: (points) => addSketchFromStroke(points),
+  onGroupTransform: (moved, live) => {
+    for (const change of moved) {
+      const block = findBlock(change.id);
+      if (!block) continue;
+      block.position = change.position;
+      block.quaternion = change.quaternion;
+    }
+    scheduleRealize(!live);
+  },
 });
+
+// ----------------------------------------------------------------- theme
+
+/**
+ * Dark by default, light on request, and the choice is remembered. Falls back
+ * silently where storage is unavailable rather than failing to start.
+ */
+function readStoredTheme() {
+  try {
+    return localStorage.getItem('buildafold.theme');
+  } catch {
+    return null;
+  }
+}
+
+function applyTheme(theme) {
+  if (theme) document.documentElement.dataset.theme = theme;
+  else delete document.documentElement.dataset.theme;
+
+  const dark =
+    theme === 'dark' ||
+    (!theme && !window.matchMedia?.('(prefers-color-scheme: light)').matches);
+
+  const button = document.getElementById('theme');
+  if (button) button.textContent = dark ? 'Light' : 'Dark';
+
+  // The viewport takes its colours from the same tokens, so it has to be told
+  // after the attribute changes.
+  viewer.applyTheme();
+}
+
+function toggleTheme() {
+  const current = document.documentElement.dataset.theme;
+  const dark =
+    current === 'dark' ||
+    (!current && !window.matchMedia?.('(prefers-color-scheme: light)').matches);
+  const next = dark ? 'light' : 'dark';
+  try {
+    localStorage.setItem('buildafold.theme', next);
+  } catch {
+    /* not fatal: the choice just will not be remembered */
+  }
+  applyTheme(next);
+}
 
 const findBlock = (id) => state.assembly.blocks.find((b) => b.id === id);
 
@@ -962,6 +1015,11 @@ document.getElementById('snap').addEventListener('change', (event) => {
 document.getElementById('show-clashes').addEventListener('change', (event) => {
   viewer.setClashMarkers(event.target.checked);
 });
+document.getElementById('theme').addEventListener('click', toggleTheme);
+document.getElementById('move-all').addEventListener('change', (event) => {
+  viewer.setGroupMode(event.target.checked);
+  flash(event.target.checked ? 'Moving the whole design.' : 'Moving one block at a time.');
+});
 document.getElementById('undo').addEventListener('click', undo);
 document.getElementById('pack').addEventListener('click', packAgainstPrevious);
 document.getElementById('recentre').addEventListener('click', () => viewer.recentre(state.realized));
@@ -1025,6 +1083,11 @@ window.addEventListener('keydown', (event) => {
   if (event.key === 'g') setMode('translate');
   if (event.key === 'r') setMode('rotate');
   if (event.key === 'd') setMode('sketch');
+  if (event.key === 'a') {
+    const toggle = document.getElementById('move-all');
+    toggle.checked = !toggle.checked;
+    toggle.dispatchEvent(new Event('change'));
+  }
   if (event.key === 'Escape') select(null);
   if (event.key === 'Delete' || event.key === 'Backspace') deleteSelected();
 });
@@ -1066,6 +1129,7 @@ if (buildId) {
   if (label) label.textContent = `build ${buildId}`;
 }
 
+applyTheme(readStoredTheme());
 renderPalette();
 loadExample();
 setMode('translate');

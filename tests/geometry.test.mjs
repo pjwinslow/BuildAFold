@@ -227,3 +227,57 @@ test('seedResidue has ideal internal geometry', () => {
   close(distance(seed.CA, seed.C), BOND.CA_C, 1e-9);
   close(angle(seed.N, seed.CA, seed.C), ANGLE.N_CA_C, 1e-7);
 });
+
+test('transformAbout moves a group rigidly', async () => {
+  const { transformAbout, quaternionMultiply } = await import('../src/geometry/frame.js');
+
+  const blocks = [
+    { id: 'a', position: [10, 0, 0], quaternion: [0, 0, 0, 1] },
+    { id: 'b', position: [-10, 0, 0], quaternion: [0, 0, 0, 1] },
+    { id: 'c', position: [0, 6, 0], quaternion: [0, 0, 0, 1] },
+  ];
+  const pivot = { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+
+  // Pure translation shifts everything by the same amount.
+  const shifted = transformAbout(blocks, pivot, { position: [5, -2, 3], quaternion: [0, 0, 0, 1] });
+  shifted.forEach((block, i) => {
+    assert.deepEqual(
+      block.position.map((v) => Number(v.toFixed(6))),
+      blocks[i].position.map((v, axis) => Number((v + [5, -2, 3][axis]).toFixed(6))),
+    );
+    assert.deepEqual(block.quaternion, [0, 0, 0, 1], 'translation must not rotate anything');
+  });
+
+  // A quarter turn about z sends +x to +y, about the pivot.
+  const quarter = [0, 0, Math.SQRT1_2, Math.SQRT1_2];
+  const turned = transformAbout(blocks, pivot, { position: [0, 0, 0], quaternion: quarter });
+  close(turned[0].position[0], 0, 1e-6, 'x should rotate away');
+  close(turned[0].position[1], 10, 1e-6, 'onto y');
+  close(turned[2].position[0], -6, 1e-6, '+y goes to -x');
+
+  // Every block picks up the same rotation.
+  for (const block of turned) {
+    assert.deepEqual(
+      block.quaternion.map((v) => Number(v.toFixed(6))),
+      quarter.map((v) => Number(v.toFixed(6))),
+    );
+  }
+
+  // Distances inside the group are preserved: it is rigid.
+  const spread = (list) => distance(list[0].position, list[1].position);
+  close(spread(turned), spread(blocks), 1e-6, 'a rigid move cannot change the shape');
+
+  // Rotating about an off-centre pivot swings the group around it.
+  const offset = { position: [10, 0, 0], quaternion: [0, 0, 0, 1] };
+  const swung = transformAbout(blocks, offset, { position: [10, 0, 0], quaternion: quarter });
+  close(swung[0].position[0], 10, 1e-6, 'a block at the pivot stays put');
+  close(swung[0].position[1], 0, 1e-6);
+  close(spread(swung), spread(blocks), 1e-6);
+
+  // Composing the rotation twice equals a half turn.
+  const twice = transformAbout(turned, pivot, { position: [0, 0, 0], quaternion: quarter });
+  close(twice[0].position[0], -10, 1e-6);
+  assert.ok(
+    quaternionMultiply(quarter, quarter).every((v, i) => Math.abs(v - [0, 0, 1, 0][i]) < 1e-6),
+  );
+});

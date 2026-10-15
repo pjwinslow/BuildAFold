@@ -717,3 +717,145 @@ test('the page reports which build it is running', async () => {
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('the theme follows the system preference until it is overridden', async () => {
+  // No stored choice: the page takes the system setting, so the button offers
+  // whichever theme is not currently showing.
+  const darkSystem = await openApp({ colorScheme: 'dark' });
+  assert.equal(await darkSystem.page.locator('#theme').textContent(), 'Light');
+  await darkSystem.page.close();
+
+  const lightSystem = await openApp({ colorScheme: 'light' });
+  assert.equal(await lightSystem.page.locator('#theme').textContent(), 'Dark');
+  assert.deepEqual(lightSystem.errors, []);
+  await lightSystem.page.close();
+});
+
+test('light mode recolours the page and the viewport together', async () => {
+  const { page, errors } = await openApp({ colorScheme: 'dark' });
+
+  const read = () =>
+    page.evaluate(() => {
+      const styles = getComputedStyle(document.documentElement);
+      return {
+        theme: document.documentElement.dataset.theme ?? null,
+        bg: styles.getPropertyValue('--bg').trim(),
+        viewport: styles.getPropertyValue('--viewport-bg').trim(),
+      };
+    });
+
+  const dark = await read();
+  await page.locator('#theme').click();
+  const light = await read();
+
+  assert.equal(light.theme, 'light');
+  assert.notEqual(light.bg, dark.bg, 'the page background must change');
+  assert.notEqual(light.viewport, dark.viewport, 'the viewport must change too');
+
+  // Light really is lighter, not merely different.
+  const brightness = (hex) =>
+    hex
+      .replace('#', '')
+      .match(/../g)
+      .reduce((sum, v) => sum + parseInt(v, 16), 0);
+  assert.ok(brightness(light.bg) > brightness(dark.bg));
+  assert.ok(brightness(light.viewport) > brightness(dark.viewport));
+
+  // An explicit choice survives a reload and overrides the system setting.
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForFunction(() => document.querySelectorAll('#palette button').length > 0);
+  assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'light');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('move all switches modes without disturbing the design', async () => {
+  const { page, errors } = await openApp();
+
+  const snapshot = () =>
+    page.evaluate(() => {
+      const metrics = document.querySelector('.metrics').textContent;
+      return {
+        ss: document.querySelector('.ss-strip').textContent,
+        rg: Number(metrics.match(/Radius of gyration\s*([\d.]+)/)[1]),
+        clashes: Number(metrics.match(/Clashes\s*(\d+)/)[1]),
+      };
+    });
+
+  const before = await snapshot();
+
+  await page.locator('#move-all').check();
+  await page.waitForFunction(() =>
+    document.querySelector('#readout').textContent.includes('whole design'),
+  );
+  assert.ok(await page.locator('#move-all').isChecked());
+
+  await page.locator('#move-all').uncheck();
+  await page.waitForFunction(() =>
+    document.querySelector('#readout').textContent.includes('one block at a time'),
+  );
+
+  const after = await snapshot();
+  assert.equal(after.ss, before.ss, 'toggling the mode must not change the design');
+  assert.ok(Math.abs(after.rg - before.rg) < 0.01);
+  assert.equal(after.clashes, before.clashes);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('nothing becomes unreadable in light mode', async () => {
+  // Regression: the selected chain row kept a hardcoded dark background, so in
+  // light mode it was dark text on dark navy. Any colour that does not come
+  // from a token can do this, so check the contrast rather than the markup.
+  const { page, errors } = await openApp({ colorScheme: 'light' });
+  await page.locator('#chain-list li').first().click();
+  await page.waitForSelector('#chain-list li.selected');
+
+  const readings = await page.evaluate(() => {
+    const parse = (value) => (value.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = ([r, g, b]) =>
+      [r, g, b]
+        .map((c) => c / 255)
+        .map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+        .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+
+    // Walk up for the nearest element that actually paints a background.
+    const backgroundOf = (element) => {
+      for (let node = element; node; node = node.parentElement) {
+        const value = getComputedStyle(node).backgroundColor;
+        if (value && !value.includes('rgba(0, 0, 0, 0)')) return parse(value);
+      }
+      return [255, 255, 255];
+    };
+
+    const targets = [
+      '#chain-list li.selected',
+      '#chain-list li.selected .len',
+      '.topbar button.active',
+      '.validation .status',
+      '.metrics span',
+      '.hint',
+      '#build-id',
+    ];
+
+    return targets.map((selector) => {
+      const element = document.querySelector(selector);
+      if (!element) return { selector, ratio: null };
+      const fg = luminance(parse(getComputedStyle(element).color));
+      const bg = luminance(backgroundOf(element));
+      const ratio = (Math.max(fg, bg) + 0.05) / (Math.min(fg, bg) + 0.05);
+      return { selector, ratio: Number(ratio.toFixed(2)) };
+    });
+  });
+
+  for (const { selector, ratio } of readings) {
+    if (ratio === null) continue;
+    // 3:1 is the floor for large or secondary text; anything below is a bug.
+    assert.ok(ratio >= 3, `${selector} has contrast ${ratio}:1 in light mode`);
+  }
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});

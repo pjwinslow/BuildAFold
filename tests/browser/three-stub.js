@@ -149,6 +149,9 @@ export class Quaternion {
     const n = Math.hypot(this.x, this.y, this.z, this.w) || 1;
     return this.set(this.x / n, this.y / n, this.z / n, this.w / n);
   }
+  invert() {
+    return this.set(-this.x, -this.y, -this.z, this.w);
+  }
   multiply(q) {
     const { x: ax, y: ay, z: az, w: aw } = this;
     const { x: bx, y: by, z: bz, w: bw } = q;
@@ -169,8 +172,10 @@ export class Vector2 {
 }
 
 export class Color {
-  constructor(hex = 0) {
-    this.setHex(hex);
+  constructor(value = 0) {
+    // Real Color accepts CSS strings as well as numbers, and the theme tokens
+    // arrive as strings.
+    this.setHex(typeof value === 'string' ? parseInt(value.replace('#', ''), 16) || 0 : value);
   }
   setHex(hex) {
     this.hex = hex;
