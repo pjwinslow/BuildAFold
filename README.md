@@ -33,8 +33,9 @@ npm run serve        # → http://localhost:8173
 
 | | |
 |---|---|
-| **Blocks** panel | click a type to add it to the chain |
+| **Blocks** panel | click a type to add it on the end of the chain, in line with the last element |
 | **Move / Rotate** (`G` / `R`) | drag the gizmo on the selected block |
+| **Bend** slider | curve an element along its own axis, up to a quarter circle |
 | **Sketch** (`D`) | drag in the viewport to draw a path |
 | **Shape** panel | type a word, get a backbone shaped like it |
 | **Fetch structure** panel | pull in a PDB entry or AlphaFold model as editable blocks |
@@ -85,6 +86,17 @@ strokes, so it's three helices. Elements are pulled back from their shared
 corners to leave room for the connecting loop, which turns out to be the single
 biggest factor in whether a letter comes out clash-free.
 
+**Bending** works through torsions, because that is the only freedom a
+backbone has — bond lengths and angles are fixed. The element's own ideal trace
+is wrapped around a circular arc and its torsions are refitted to that curve,
+with the search held inside a window around the ideal `(phi, psi)`. The
+restraint is the point: fit a curve with the whole Ramachandran plot available
+and you get whatever conformation follows it, usually a coil. Held near the
+ideal, you get the same element, bent as far as its own torsions allow. A
+strand is stiff, so past about 60 degrees it starts falling behind the arc you
+asked for; the panel says by how much rather than quietly returning something
+straighter.
+
 **Imported structures** keep their real coordinates — a helix from a crystal
 structure isn't an ideal helix, and the point of importing one is to build
 against the real thing. Loops are rebuilt at their original length so the
@@ -112,8 +124,8 @@ tools/          dev server, site build, diagnostics
 ## Tests
 
 ```bash
-npm test         # 74 geometry and model tests
-npm run test:ui  # 25 browser tests (Playwright)
+npm test         # 83 geometry and model tests
+npm run test:ui  # 32 browser tests (Playwright)
 ```
 
 ## What it doesn't do
@@ -124,7 +136,8 @@ npm run test:ui  # 25 browser tests (Playwright)
   loops joining the strokes have to cross the letter and some pass through it.
   They're marked in red; partial diffusion would rebuild those turns anyway.
 - **No β-sheet registry.** Strands can sit side by side but aren't snapped into
-  a hydrogen-bonded register. Most valuable thing to add next.
+  a hydrogen-bonded register, and bending them doesn't bend their neighbours to
+  match. Most valuable thing to add next.
 - **Sketch depth isn't inferred.** Strokes land on the plane facing the camera;
   you supply depth by orbiting and redrawing.
 - **Backbone only.** Side chains, ligands and waters are dropped on import, and

@@ -859,3 +859,100 @@ test('nothing becomes unreadable in light mode', async () => {
   assert.deepEqual(errors, []);
   await page.close();
 });
+
+test('a new block lands at the end of the chain, needing only a short loop', async () => {
+  // A block dropped somewhere convenient has to be reached by a loop that
+  // crosses the design. Continuing from the last element's end instead is the
+  // whole point, and the loop length is where that shows up.
+  const { page, errors } = await openApp();
+
+  await page.locator('#palette button', { hasText: 'Alpha helix' }).first().click();
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 5);
+
+  const linkers = await page.locator('.linker-row span').allTextContents();
+  const lengths = linkers.map((text) => Number(/(\d+) aa/.exec(text)?.[1]));
+  assert.equal(lengths.length, 4, 'four junctions between five elements');
+
+  const added = lengths[lengths.length - 1];
+  assert.ok(added <= 4, `the new junction should be short, got ${added} aa`);
+  assert.ok(
+    linkers.every((text) => !text.includes('will not close')),
+    'and it should close',
+  );
+
+  // The example's own lattice-placed helices sit side by side, so their
+  // junctions are longer than one that continues the chain.
+  assert.ok(
+    Math.max(...lengths.slice(0, 3)) > added,
+    `continuing should beat dropping alongside (${lengths.join(', ')})`,
+  );
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('the bend slider curves an element and says how well it fitted', async () => {
+  const { page, errors } = await openApp();
+
+  await page.locator('#chain-list li').first().click();
+  const bend = page.locator('#inspector input[type="range"]').nth(1);
+  await bend.waitFor();
+  assert.equal(await bend.inputValue(), '0', 'blocks start straight');
+
+  const note = page.locator('#inspector p.hint').first();
+  assert.match(await note.textContent(), /Straight/);
+
+  // Drive it the way a drag does: previews, then a commit.
+  await bend.evaluate((el) => {
+    for (const value of [20, 40, 60]) {
+      el.value = String(value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+
+  await page.waitForFunction(() =>
+    /Bent 60/.test(document.querySelector('#inspector p.hint')?.textContent ?? ''),
+  );
+  assert.match(await note.textContent(), /within \d+\.\d A of a true arc/);
+
+  // The helix is still a helix in the exported secondary structure.
+  assert.ok((await page.locator('.ss-strip').textContent()).includes('H'));
+
+  // One undo step for the whole drag, and it goes back to straight.
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(() =>
+    /Straight/.test(document.querySelector('#inspector p.hint')?.textContent ?? ''),
+  );
+  assert.equal(await bend.inputValue(), '0');
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});
+
+test('a drawn stroke becomes a block', async () => {
+  // Regression: the sketch handler referred to an undeclared `block`, so every
+  // stroke threw a ReferenceError and nothing was ever added.
+  const { page, errors } = await openApp();
+
+  await page.keyboard.press('d');
+  const box = await page.locator('#viewport canvas').boundingBox();
+
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x + box.width * 0.3, y);
+  await page.mouse.down();
+  for (let t = 0.3; t <= 0.7; t += 0.05) {
+    await page.mouse.move(box.x + box.width * t, y + Math.sin(t * 8) * 20);
+  }
+  await page.mouse.up();
+
+  await page.waitForFunction(() => document.querySelectorAll('#chain-list li').length === 5);
+  const names = await page.locator('#chain-list li .name').allTextContents();
+  assert.match(names[names.length - 1], /Sketch \(\d+ aa\)/);
+
+  // And it is the selected block, as adding anything else would be.
+  assert.equal(await page.locator('#chain-list li.selected .name').textContent(), names[4]);
+
+  assert.deepEqual(errors, []);
+  await page.close();
+});

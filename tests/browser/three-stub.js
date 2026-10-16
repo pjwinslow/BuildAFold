@@ -323,11 +323,24 @@ export class Plane {
 
 export class Raycaster {
   constructor() {
+    this.pointer = new Vector2();
     this.ray = {
-      intersectPlane: (plane, target) => target.set(0, 0, 0),
+      /**
+       * Enough of a projection to exercise sketching: the stub camera looks
+       * down -z (see PerspectiveCamera.getWorldDirection), so the plane facing
+       * it is z = 0, and normalised device coordinates map onto it linearly.
+       * The 30 A half-width stands in for a default camera distance. Not the
+       * real projection, but it turns a drag across the viewport into a stroke
+       * of plausible size instead of a pile of points at the origin.
+       */
+      intersectPlane: (plane, target) =>
+        target.set(this.pointerRef.x * 30, this.pointerRef.y * 30, 0),
     };
+    this.pointerRef = this.pointer;
   }
-  setFromCamera() {}
+  setFromCamera(pointer) {
+    this.pointerRef = pointer;
+  }
   intersectObjects() {
     return [];
   }

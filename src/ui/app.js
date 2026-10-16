@@ -14,12 +14,16 @@ import {
   createAssembly,
   addBlock,
   addSketchBlock,
+  bendResidual,
+  blockExtent,
   removeBlock,
   reorderBlock,
   realize,
   serialize,
   deserialize,
 } from '../model/assembly.js';
+import { MAX_BEND } from '../geometry/bend.js';
+import { placeAfter } from '../geometry/frame.js';
 import { BLOCK_TYPES, SS_PRESETS } from '../geometry/constants.js';
 import { liftSketch } from '../geometry/trace.js';
 import { writePDB } from '../io/pdb.js';
@@ -30,6 +34,18 @@ import { fetchStructure, parseStructure, assemblyFromChain } from '../io/structu
 import { findClashes } from '../geometry/validate.js';
 
 const SPACING = { helix: 10.5, helix310: 9.5, strand: 4.9, strandPar: 4.9, sketch: 8 };
+
+/**
+ * Space left between one element's end and the next one's start, in angstrom.
+ *
+ * Measured, not guessed. Closer than this and the junction is short enough that
+ * the loop has nowhere to route: across helix and strand pairings, gaps of 7 to
+ * 10 A leave anything from one to five clashes, and one pairing stops closing
+ * altogether. At 11 A every combination closes with a four-residue loop and no
+ * clashes, which is about as tight as two elements can meet and still be joined
+ * by something a protein could actually do.
+ */
+const LINKER_GAP = 11;
 
 const state = {
   assembly: createAssembly('Untitled design'),
@@ -222,8 +238,11 @@ function latticePoint(index) {
   return points[index];
 }
 
-function suggestPlacement(type) {
-  const index = state.assembly.blocks.length;
+/**
+ * Lattice placement for the four-helix bundle the app opens with, where the
+ * point is to show four helices packed side by side.
+ */
+function bundlePlacement(index, type) {
   const spacing = SPACING[type] ?? 9;
   const [i, j] = latticePoint(index);
 
@@ -231,6 +250,36 @@ function suggestPlacement(type) {
   // arrangement for both bundles and hairpins.
   const quaternion = index % 2 === 0 ? [0, 0, 0, 1] : [1, 0, 0, 0];
   return { position: [i * spacing, j * spacing, 0], quaternion };
+}
+
+/**
+ * Place a block that has just been added so it continues on from the end of
+ * the chain, in the same orientation as the element before it.
+ *
+ * The block has to exist before this can be worked out, because how far along
+ * to put it depends on how long it is.
+ */
+function placeAtChainEnd(block) {
+  const index = state.assembly.blocks.indexOf(block);
+  const previous = state.assembly.blocks[index - 1];
+  if (!previous) return { position: [0, 0, 0], quaternion: [0, 0, 0, 1] };
+
+  return placeAfter(
+    {
+      position: previous.position,
+      quaternion: previous.quaternion,
+      extent: blockExtent(previous),
+    },
+    blockExtent(block),
+    LINKER_GAP,
+  );
+}
+
+/** Add a block to the end of the chain and stand it in line behind the last one. */
+function addAtChainEnd(spec) {
+  const block = addBlock(state.assembly, spec);
+  Object.assign(block, placeAtChainEnd(block));
+  return block;
 }
 
 /** Align the selected block antiparallel to the one before it, at contact distance. */
@@ -271,7 +320,7 @@ function packAgainstPrevious() {
 
 function appendBlock(type) {
   snapshot();
-  const block = addBlock(state.assembly, { type, ...suggestPlacement(type) });
+  const block = addAtChainEnd({ type });
   select(block.id);
   scheduleRealize(true);
 }
@@ -292,7 +341,7 @@ function addSketchFromStroke(points) {
   snapshot();
   // liftSketch returns the chain already superimposed on the stroke, so the
   // block's own placement is the identity: its canonical frame carries the shape.
-  addSketchBlock(state.assembly, lifted.residues, {
+  const block = addSketchBlock(state.assembly, lifted.residues, {
     name: `Sketch (${lifted.residues.length} aa)`,
   });
   select(block.id);
@@ -692,6 +741,23 @@ function renderInspector() {
       }),
     );
     dom.inspector.appendChild(
+      sliderField('Bend', block.bend ?? 0, -MAX_BEND, MAX_BEND, {
+        step: 5,
+        // Bending refits torsions, so dragging uses the cheap fit and only the
+        // released value gets the exact one.
+        onPreview: (value) => {
+          block.bend = value;
+          scheduleRealize(false);
+          updateBendReadout(block, value);
+        },
+        onCommit: (value) => {
+          block.bend = value;
+          scheduleRealize(true);
+        },
+      }),
+    );
+    dom.inspector.appendChild(bendNote(block));
+    dom.inspector.appendChild(
       numberField('phi', block.phi ?? SS_PRESETS[block.type].phi, -180, 180, 1, (value) => {
         snapshot();
         block.phi = value;
@@ -719,10 +785,10 @@ function renderInspector() {
   duplicate.textContent = 'Duplicate';
   duplicate.addEventListener('click', () => {
     snapshot();
-    const copy = addBlock(state.assembly, {
+    const copy = addAtChainEnd({
       type: block.type === 'sketch' ? 'polyproline' : block.type,
       nResidues: block.nResidues,
-      ...suggestPlacement(block.type),
+      bend: block.bend,
     });
     select(copy.id);
     scheduleRealize(true);
@@ -743,7 +809,7 @@ function renderInspector() {
  * you can see a helix grow into its neighbours — and the box is for typing an
  * exact length. One undo entry is taken per interaction rather than per frame.
  */
-function sliderField(label, value, min, max, { onPreview, onCommit }) {
+function sliderField(label, value, min, max, { onPreview, onCommit, step = 1 }) {
   const wrapper = document.createElement('label');
   wrapper.className = 'slider-field';
 
@@ -753,13 +819,14 @@ function sliderField(label, value, min, max, { onPreview, onCommit }) {
 
   const range = document.createElement('input');
   range.type = 'range';
-  Object.assign(range, { min, max, step: 1, value });
+  Object.assign(range, { min, max, step, value });
 
   const number = document.createElement('input');
   number.type = 'number';
-  Object.assign(number, { min, max, step: 1, value });
+  Object.assign(number, { min, max, step, value });
 
-  const clamp = (raw) => Math.min(max, Math.max(min, Math.round(Number(raw))));
+  const clamp = (raw) =>
+    Math.min(max, Math.max(min, Math.round(Number(raw) / step) * step));
 
   let editing = false;
   const beginEdit = () => {
@@ -796,9 +863,40 @@ function sliderField(label, value, min, max, { onPreview, onCommit }) {
 }
 
 /**
- * Keep the corner readout truthful while a slider is being dragged; the full
- * panels are only refreshed on the exact rebuild.
+ * How well the bend came out.
+ *
+ * An element can only bend as far as its own torsions allow, and a strand is
+ * stiff: past about 60 degrees the fit starts to fall behind the arc that was
+ * asked for. Saying so is more use than quietly returning something straighter
+ * than requested.
  */
+function bendNote(block) {
+  const note = document.createElement('p');
+  note.className = 'hint';
+  if (!block.bend) {
+    note.textContent = 'Straight. Bend curves the element along its own axis.';
+    return note;
+  }
+
+  const residual = bendResidual(block);
+  note.textContent =
+    `Bent ${Math.abs(block.bend)}\u00b0, within ${residual.toFixed(1)} A of a true arc.`;
+  if (residual > 1.5) {
+    note.textContent += ' Shorten the bend or lengthen the element for a closer fit.';
+    note.style.color = 'var(--warn)';
+  }
+  return note;
+}
+
+/**
+ * Keep the corner readout truthful while either slider is being dragged; the
+ * full panels are only refreshed on the exact rebuild.
+ */
+function updateBendReadout(block, value) {
+  dom.readout.innerHTML =
+    `<strong>${block.name}</strong>: bend ${value}\u00b0 · release to confirm`;
+}
+
 function updateLengthReadout(block, value) {
   dom.readout.innerHTML =
     `<strong>${block.name}</strong>: ${value} residues · release to confirm`;
@@ -1113,7 +1211,7 @@ function loadExample() {
   snapshot();
   state.assembly = createAssembly('Four-helix bundle');
   for (let i = 0; i < 4; i += 1) {
-    addBlock(state.assembly, { type: 'helix', nResidues: 16, ...suggestPlacement('helix') });
+    addBlock(state.assembly, { type: 'helix', nResidues: 16, ...bundlePlacement(i, 'helix') });
   }
   select(null);
   viewer.syncBlocks(state.assembly);

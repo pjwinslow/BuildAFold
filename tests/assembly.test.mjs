@@ -269,3 +269,139 @@ test('a direct junction with a gap still reports the gap', () => {
   assert.equal(result.ok, false);
   assert.match(result.closures[0].note, /apart/);
 });
+
+test('a block placed at the chain end needs only a minimal linker', async () => {
+  const { blockExtent } = await import('../src/model/assembly.js');
+  const { placeAfter } = await import('../src/geometry/frame.js');
+
+  resetIds();
+  const assembly = createAssembly('Continued chain');
+  const first = addBlock(assembly, { type: 'helix', nResidues: 14, position: [0, 0, 0] });
+
+  const second = addBlock(assembly, { type: 'helix', nResidues: 14 });
+  Object.assign(
+    second,
+    placeAfter(
+      { position: first.position, quaternion: first.quaternion, extent: blockExtent(first) },
+      blockExtent(second),
+      11,
+    ),
+  );
+
+  const continued = realize(assembly);
+  const junction = continued.closures.find((c) => c.blockId === second.id);
+  assert.ok(junction.nResidues <= 4, `a short junction, got ${junction.nResidues} residues`);
+  assert.ok(junction.converged, 'and it closes');
+  assert.equal(junction.clashes, 0);
+  assert.equal(continued.validation.clashes.length, 0, 'with nothing overlapping');
+
+  // The lattice placement the palette used to use drops the block beside the
+  // first one instead, which costs a longer loop for the same two elements.
+  const lattice = createAssembly('Lattice');
+  addBlock(lattice, { type: 'helix', nResidues: 14, position: [0, 0, 0] });
+  const dropped = addBlock(lattice, {
+    type: 'helix',
+    nResidues: 14,
+    position: [10.5, 0, 0],
+    quaternion: [1, 0, 0, 0],
+  });
+  const beside = realize(lattice).closures.find((c) => c.blockId === dropped.id);
+  assert.ok(
+    beside.nResidues > junction.nResidues,
+    `continuing the chain should need a shorter linker than dropping alongside ` +
+      `(${junction.nResidues} vs ${beside.nResidues})`,
+  );
+});
+
+test('a bent block realises, round-trips and keeps ideal bonds', async () => {
+  const { bendResidual, blockExtent } = await import('../src/model/assembly.js');
+
+  resetIds();
+  const assembly = createAssembly('Bent sheet');
+  addBlock(assembly, { type: 'strand', nResidues: 18, position: [0, 0, 0], bend: 60 });
+  addBlock(assembly, {
+    type: 'strand',
+    nResidues: 18,
+    position: [5, 0, 0],
+    quaternion: [1, 0, 0, 0],
+    bend: -60,
+  });
+
+  const result = realize(assembly);
+  assert.equal(result.residues.length > 36, true);
+  for (let i = 1; i < result.residues.length; i += 1) {
+    const bond = distance(result.residues[i - 1].C, result.residues[i].N);
+    assert.ok(Math.abs(bond - BOND.C_N) < 0.3, `peptide bond ${i} is ${bond.toFixed(2)} A`);
+  }
+
+  // A bent strand is shorter end to end than a straight one of the same length.
+  const straight = createAssembly('Straight');
+  addBlock(straight, { type: 'strand', nResidues: 18, position: [0, 0, 0] });
+  assert.ok(
+    blockExtent(assembly.blocks[0]) < blockExtent(straight.blocks[0]),
+    'bending has to shorten the element along its axis',
+  );
+
+  // The residual is reported, and reported as zero when there is no bend.
+  assert.ok(bendResidual(assembly.blocks[0]) > 0);
+  assert.equal(bendResidual(straight.blocks[0]), 0);
+
+  // Bend survives save and load, geometry and all.
+  const reloaded = deserialize(JSON.parse(JSON.stringify(serialize(assembly))));
+  assert.equal(reloaded.blocks[0].bend, 60);
+  assert.equal(reloaded.blocks[1].bend, -60);
+  assert.deepEqual(
+    realize(reloaded).residues.map((r) => r.CA),
+    result.residues.map((r) => r.CA),
+    'a reloaded design must rebuild identically',
+  );
+});
+
+test('changing bend or length invalidates the cached geometry', async () => {
+  const { blockGeometry } = await import('../src/model/assembly.js');
+
+  resetIds();
+  const assembly = createAssembly('Cache');
+  const block = addBlock(assembly, { type: 'strand', nResidues: 16, position: [0, 0, 0] });
+
+  const flat = blockGeometry(block).map((r) => [...r.CA]);
+  block.bend = 60;
+  const bent = blockGeometry(block).map((r) => [...r.CA]);
+  assert.notDeepEqual(bent, flat, 'a new bend must not serve the old geometry');
+
+  // And going back gets the original, from cache or not.
+  block.bend = 0;
+  assert.deepEqual(blockGeometry(block).map((r) => [...r.CA]), flat);
+
+  // The preview fit is a separate cache entry, not a replacement for the exact one.
+  block.bend = 60;
+  blockGeometry(block, { preview: true });
+  assert.deepEqual(blockGeometry(block).map((r) => [...r.CA]), bent);
+});
+
+test('realising a block records how long it actually is', async () => {
+  // The viewer sizes its drag handles from this, so it has to track the
+  // geometry rather than being estimated from the residue count.
+  resetIds();
+  const assembly = createAssembly('Extents');
+  const helix = addBlock(assembly, { type: 'helix', nResidues: 20, position: [0, 0, 0] });
+
+  realize(assembly);
+  const straight = helix.extent;
+  assert.ok(straight > 25 && straight < 32, `a 20-residue helix is ~29 A, got ${straight}`);
+
+  helix.bend = 60;
+  realize(assembly);
+  // Bent into a 60 degree arc, the element's end-to-end length is the chord of
+  // that arc: sin(30)/(pi/6) of what it was.
+  const chord = straight * (Math.sin(Math.PI / 6) / (Math.PI / 6));
+  assert.ok(helix.extent < straight, `bending must shorten the extent, got ${helix.extent}`);
+  assert.ok(
+    Math.abs(helix.extent - chord) < 0.05 * chord,
+    `expected about ${chord.toFixed(1)} A, got ${helix.extent.toFixed(1)}`,
+  );
+
+  helix.bend = 0;
+  realize(assembly);
+  assert.equal(helix.extent, straight, 'and straightening must restore it');
+});

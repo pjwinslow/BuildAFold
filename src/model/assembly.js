@@ -11,6 +11,7 @@
  */
 
 import { buildElement, cloneResidues, completeResidue } from '../geometry/chain.js';
+import { bentElement, PREVIEW_BEND } from '../geometry/bend.js';
 import { canonicalize, placeBlock } from '../geometry/frame.js';
 import { superpose } from '../geometry/kabsch.js';
 import { closeLoop, closureFeasibility } from '../geometry/ccd.js';
@@ -34,27 +35,70 @@ export function createAssembly(name = 'Untitled design') {
  * Canonical geometry for a block, cached on the block itself. Sketch blocks
  * carry baked residues; SSE blocks are rebuilt whenever their parameters
  * change.
+ *
+ * Bending an element costs a torsion refit, so `preview` selects the cheap fit
+ * for use while a slider is moving — the same preview/commit split the linker
+ * closure uses, and with the same rule: preview geometry is never what gets
+ * exported.
  */
-export function blockGeometry(block) {
+export function blockGeometry(block, options = {}) {
   if (block.kind === 'sketch') return block.canonical;
-  if (!block._cache || block._cache.key !== geometryKey(block)) {
-    const residues = buildElement(block.type, block.nResidues, {
-      phi: block.phi,
-      psi: block.psi,
-    });
-    block._cache = { key: geometryKey(block), residues: canonicalize(residues) };
-  }
-  return block._cache.residues;
+  return cacheEntry(block, options).residues;
 }
 
-const geometryKey = (block) => `${block.type}:${block.nResidues}:${block.phi ?? ''}:${block.psi ?? ''}`;
+/**
+ * How far the bent geometry ended up from the arc that was asked for, in
+ * angstrom. Zero for an unbent block. A bend is only as good as the element's
+ * own Ramachandran basin allows, so this is reported rather than hidden.
+ */
+export function bendResidual(block, options = {}) {
+  if (block.kind === 'sketch' || !block.bend) return 0;
+  return cacheEntry(block, options).rmsd;
+}
+
+/**
+ * Keep a handful of recent geometries, not just the latest: dragging a slider
+ * walks back and forth over the same few values, and a single-entry cache
+ * refits every one of them.
+ */
+const GEOMETRY_CACHE_LIMIT = 32;
+
+function cacheEntry(block, options) {
+  const key = `${geometryKey(block)}:${options.preview ? 'preview' : 'full'}`;
+  if (!block._cache) block._cache = new Map();
+
+  const hit = block._cache.get(key);
+  if (hit) return hit;
+
+  const fit = block.bend
+    ? bentElement(block.type, block.nResidues, block.bend, {
+        phi: block.phi,
+        psi: block.psi,
+        ...(options.preview ? PREVIEW_BEND : {}),
+      })
+    : {
+        residues: buildElement(block.type, block.nResidues, { phi: block.phi, psi: block.psi }),
+        rmsd: 0,
+      };
+
+  const entry = { residues: canonicalize(fit.residues), rmsd: fit.rmsd };
+  block._cache.set(key, entry);
+  if (block._cache.size > GEOMETRY_CACHE_LIMIT) {
+    block._cache.delete(block._cache.keys().next().value);
+  }
+  return entry;
+}
+
+const geometryKey = (block) =>
+  `${block.type}:${block.nResidues}:${block.phi ?? ''}:${block.psi ?? ''}:${block.bend ?? ''}`;
 
 /**
  * Add an idealised secondary structure block.
  *
  * @param {object} assembly
  * @param {{type: string, nResidues?: number, position?: number[],
- *          quaternion?: number[], linkerBefore?: number|'auto', name?: string}} spec
+ *          quaternion?: number[], linkerBefore?: number|'auto', name?: string,
+ *          bend?: number}} spec
  */
 export function addBlock(assembly, spec) {
   const type = spec.type ?? 'helix';
@@ -67,6 +111,7 @@ export function addBlock(assembly, spec) {
     nResidues: spec.nResidues ?? defaultLength(type),
     phi: spec.phi,
     psi: spec.psi,
+    bend: spec.bend ?? 0,
     position: spec.position ?? [0, 0, 0],
     quaternion: spec.quaternion ?? [0, 0, 0, 1],
     linkerBefore: spec.linkerBefore ?? 'auto',
@@ -127,10 +172,20 @@ function restoringPlacement(canonical, world) {
 }
 
 /** Length of a canonical block along its own axis, which canonicalise puts on z. */
-function axialExtent(canonical) {
+export function axialExtent(canonical) {
   if (!canonical.length) return 0;
   const zs = canonical.map((r) => r.CA[2]);
   return Math.max(...zs) - Math.min(...zs);
+}
+
+/**
+ * How long a block is along its own axis. Sketch blocks measured theirs when
+ * they were made; an idealised element is measured from its current geometry,
+ * which changes with its length and its bend.
+ */
+export function blockExtent(block) {
+  if (block.kind === 'sketch') return block.extent ?? axialExtent(block.canonical ?? []);
+  return axialExtent(blockGeometry(block));
 }
 
 const defaultLength = (type) => (type === 'helix' || type === 'helix310' ? 14 : 7);
@@ -233,10 +288,19 @@ export const PREVIEW_CLOSURE = {
  *            closures: Array, ok: boolean}}
  */
 export function realize(assembly, options = {}) {
-  const placed = assembly.blocks.map((block) => ({
-    block,
-    residues: placeBlock(blockGeometry(block), block.position, block.quaternion),
-  }));
+  const placed = assembly.blocks.map((block) => {
+    const geometry = blockGeometry(block, { preview: options.preview });
+
+    // The viewer sizes each block's drag handle from this. Measuring it rather
+    // than estimating from the residue count matters once elements can bend: a
+    // bent one is shorter along its axis than a straight one of the same length.
+    if (block.kind !== 'sketch') block.extent = axialExtent(geometry);
+
+    return {
+      block,
+      residues: placeBlock(geometry, block.position, block.quaternion),
+    };
+  });
 
   const residues = [];
   const segments = [];
@@ -379,6 +443,7 @@ export function serialize(assembly) {
       nResidues: block.nResidues,
       phi: block.phi,
       psi: block.psi,
+      bend: block.bend,
       position: [...block.position],
       quaternion: [...block.quaternion],
       linkerBefore: block.linkerBefore,
@@ -404,7 +469,7 @@ export function deserialize(data) {
   }
   const assembly = createAssembly(data.name ?? 'Untitled design');
   assembly.blocks = data.blocks.map((block) => {
-    const restored = { ...block };
+    const restored = { ...block, _cache: undefined };
     if (block.kind === 'sketch' && block.canonical) {
       restored.canonical = block.canonical.map((r) =>
         completeResidue({ N: [...r.N], CA: [...r.CA], C: [...r.C], phi: r.phi, psi: r.psi }),

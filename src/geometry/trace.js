@@ -146,10 +146,17 @@ export function traceDescriptors(trace) {
   return { angles, dihedrals };
 }
 
-function gridOptions(step) {
-  const grid = torsionGrid(step);
-  const phiValues = [...new Set(grid.map(([phi]) => phi))].sort((a, b) => a - b);
-  const psiValues = [...new Set(grid.map(([, psi]) => psi))].sort((a, b) => a - b);
+function gridOptions(step, restrain) {
+  const [phiValues, psiValues] = restrain
+    ? [
+        windowValues(restrain.phi, restrain.window, restrain.step ?? step),
+        windowValues(restrain.psi, restrain.window, restrain.step ?? step),
+      ]
+    : [
+        [...new Set(torsionGrid(step).map(([phi]) => phi))].sort((a, b) => a - b),
+        [...new Set(torsionGrid(step).map(([, psi]) => psi))].sort((a, b) => a - b),
+      ];
+
   const psiByPhi = new Map();
   for (const phi of phiValues) {
     psiByPhi.set(
@@ -161,32 +168,45 @@ function gridOptions(step) {
 }
 
 /**
+ * Torsion values within `window` degrees of `centre`, inclusive, stepping by
+ * `step`. The centre itself is always present, so restraining a search to an
+ * ideal conformation can always return exactly that conformation.
+ */
+export function windowValues(centre, window, step) {
+  const out = [];
+  for (let k = -Math.floor(window / step); k <= Math.floor(window / step); k += 1) {
+    out.push(centre + k * step);
+  }
+  return out;
+}
+
+/**
  * Fit backbone torsions to a Ca trace.
  *
  * @param {number[][]} trace target Ca positions, already spaced at ~3.8 A
  * @param {object} [options]
  * @param {number} [options.beamWidth=24]
  * @param {number} [options.gridStep=20] Ramachandran sampling step in degrees
+ * @param {{phi: number, psi: number, window: number, step?: number}} [options.restrain]
+ *   search only within `window` degrees of this conformation, instead of over
+ *   the whole allowed plot. Used to bend a secondary structure element without
+ *   letting it stop being one.
  * @returns {{residues: Array, rmsd: number, torsions: Array, traceLength: number}}
  */
 export function fitTorsionsToTrace(trace, options = {}) {
-  const { beamWidth = 24, gridStep = 20, angleWeight = 1, dihedralWeight = 0.6 } = options;
+  const { beamWidth = 24, gridStep = 20, angleWeight = 1, dihedralWeight = 0.6, restrain } = options;
 
   if (trace.length < 2) throw new Error('a trace needs at least two points to fit');
   if (trace.length === 2) {
-    // Degenerate: a single bond. Build two residues with a default conformation.
-    const residues = buildBackbone([
-      { phi: -75, psi: 145 },
-      { phi: -75, psi: 145 },
-    ]);
-    return finalise(residues, trace, [
-      { phi: -75, psi: 145 },
-      { phi: -75, psi: 145 },
-    ]);
+    // Degenerate: a single bond. Nothing to fit, so use the restraint target if
+    // there is one and a default extended conformation otherwise.
+    const pair = { phi: restrain?.phi ?? -75, psi: restrain?.psi ?? 145 };
+    const torsions = [{ ...pair }, { ...pair }];
+    return finalise(buildBackbone(torsions), trace, torsions);
   }
 
   const target = traceDescriptors(trace);
-  const { phiValues, psiValues, psiByPhi } = gridOptions(gridStep);
+  const { phiValues, psiValues, psiByPhi } = gridOptions(gridStep, restrain);
 
   const seed = seedResidue();
   let beam = [
@@ -251,7 +271,7 @@ export function fitTorsionsToTrace(trace, options = {}) {
 
   const best = beam[0];
   // Close out the final residue with a reasonable psi; it only places the last O.
-  const torsions = [...best.torsions, { phi: best.residue.phi, psi: 145 }];
+  const torsions = [...best.torsions, { phi: best.residue.phi, psi: restrain?.psi ?? 145 }];
   return finalise(buildBackbone(torsions), trace, torsions);
 }
 

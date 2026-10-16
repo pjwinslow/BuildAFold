@@ -281,3 +281,143 @@ test('transformAbout moves a group rigidly', async () => {
     quaternionMultiply(quarter, quarter).every((v, i) => Math.abs(v - [0, 0, 1, 0][i]) < 1e-6),
   );
 });
+
+test('placeAfter continues the chain from the end of the previous block', async () => {
+  const { placeAfter } = await import('../src/geometry/frame.js');
+
+  // Along +z: half of each extent plus the gap.
+  const straight = placeAfter({ position: [0, 0, 0], quaternion: [0, 0, 0, 1], extent: 20 }, 14, 7);
+  assert.deepEqual(straight.position, [0, 0, 10 + 7 + 7]);
+  assert.deepEqual(straight.quaternion, [0, 0, 0, 1], 'the orientation is inherited, not reset');
+
+  // A quarter turn about y sends the element axis from +z to +x, so the next
+  // block has to go out along +x from wherever the previous one sits.
+  const quarter = [0, Math.SQRT1_2, 0, Math.SQRT1_2];
+  const turned = placeAfter({ position: [5, 1, -2], quaternion: quarter, extent: 20 }, 14, 7);
+  close(turned.position[0], 5 + 24, 1e-6, 'advances along the rotated axis');
+  close(turned.position[1], 1, 1e-6, 'and not across it');
+  close(turned.position[2], -2, 1e-6);
+  assert.deepEqual(turned.quaternion, quarter);
+
+  // The gap between the two blocks' near ends is exactly what was asked for,
+  // whatever the two extents are — that is what sizes the linker.
+  for (const [a, b, gap] of [[20, 14, 7], [8, 30, 3], [12, 12, 0]]) {
+    const next = placeAfter({ position: [0, 0, 0], quaternion: [0, 0, 0, 1], extent: a }, b, gap);
+    close(next.position[2] - a / 2 - b / 2, gap, 1e-9);
+  }
+});
+
+test('arcBend wraps an axis onto a circle without stretching it', async () => {
+  const { arcBend } = await import('../src/geometry/bend.js');
+
+  // A straight run of points along z, 1 A apart, centred on the origin.
+  const points = [];
+  for (let z = -10; z <= 10; z += 1) points.push([0, 0, z]);
+
+  assert.deepEqual(arcBend(points, 0), points, 'no bend leaves the points alone');
+
+  const bent = arcBend(points, 90);
+
+  // Arc length is preserved: spacing along the curve is unchanged.
+  for (let i = 1; i < bent.length; i += 1) {
+    close(distance(bent[i - 1], bent[i]), 1, 1e-3, 'bending must not stretch the axis');
+  }
+
+  // The chord of a 90 degree arc is sin(45)/(pi/4) of its length.
+  const expected = 20 * (Math.sin(Math.PI / 4) / (Math.PI / 4));
+  close(distance(bent[0], bent[bent.length - 1]), expected, 1e-6);
+
+  // Every point is the same distance from the centre of curvature.
+  const radius = 20 / (Math.PI / 2);
+  for (const p of bent) close(distance(p, [radius, 0, 0]), radius, 1e-6);
+
+  // Negative bends curve the other way, and are otherwise a mirror image.
+  const other = arcBend(points, -90);
+  other.forEach((p, i) => {
+    close(p[0], -bent[i][0], 1e-9);
+    close(p[2], bent[i][2], 1e-9);
+  });
+
+  // Off-axis points are carried round, keeping their distance from the centre
+  // of curvature — that is what makes the map a bend and not a projection.
+  const column = points.map(([, , z]) => [1, 0, z]);
+  const radius60 = 20 / (Math.PI / 3);
+  for (const p of arcBend(column, 60)) {
+    close(distance(p, [radius60, 0, 0]), radius60 - 1, 1e-6, 'inside the bend');
+  }
+  for (const p of arcBend(column, -60)) {
+    close(distance(p, [-radius60, 0, 0]), radius60 + 1, 1e-6, 'outside the bend');
+  }
+});
+
+test('a bent element is still the element it started as', async () => {
+  const { bentElement, MAX_BEND } = await import('../src/geometry/bend.js');
+  const { assignSecondaryStructure } = await import('../src/geometry/ssassign.js');
+  const { findClashes } = await import('../src/geometry/validate.js');
+  const { isAllowed: allowed } = await import('../src/geometry/rama.js');
+
+  for (const [type, n, code] of [['strand', 16, 'E'], ['helix', 20, 'H'], ['strandPar', 16, 'E']]) {
+    const straight = bentElement(type, n, 0);
+    close(straight.rmsd, 0, 0, 'a straight element is not fitted at all');
+    assert.deepEqual(
+      straight.residues.map((r) => r.CA),
+      buildElement(type, n).map((r) => r.CA),
+      'bend 0 must be the ideal element, untouched',
+    );
+
+    for (const bend of [30, 60, MAX_BEND, -60]) {
+      const { residues, rmsd } = bentElement(type, n, bend);
+      assert.equal(residues.length, n);
+
+      // Ideal bond geometry is not negotiable: it is what every export relies on.
+      for (let i = 1; i < residues.length; i += 1) {
+        close(distance(residues[i - 1].C, residues[i].N), BOND.C_N, 1e-6, `${type} ${bend}`);
+      }
+      for (const residue of residues) {
+        close(distance(residue.N, residue.CA), BOND.N_CA, 1e-6);
+        close(angle(residue.N, residue.CA, residue.C), ANGLE.N_CA_C, 1e-5);
+      }
+
+      // Still in a populated basin, and still reads as its own structure.
+      for (const residue of residues) {
+        if (residue.phi === null || residue.psi === null) continue;
+        assert.ok(allowed(residue.phi, residue.psi), `${type} ${bend} left the Ramachandran plot`);
+      }
+      const assigned = assignSecondaryStructure(residues.map((r) => r.CA));
+      const fraction = [...assigned].filter((c) => c === code).length / assigned.length;
+      assert.ok(fraction > 0.8, `${type} bent ${bend} assigned ${assigned}`);
+
+      assert.equal(findClashes(residues).length, 0, `${type} bent ${bend} clashes with itself`);
+      assert.ok(rmsd < 2, `${type} bent ${bend} missed the arc by ${rmsd.toFixed(2)} A`);
+    }
+  }
+});
+
+test('a bent element really does bend, by about the amount asked for', async () => {
+  const { bentElement } = await import('../src/geometry/bend.js');
+
+  // Independent of the fit: a circular arc of angle t has a chord of
+  // sin(t/2)/(t/2) of its arc length, so the end-to-end span of a bent element
+  // has to shrink by that factor. Nothing about the torsion search is involved.
+  for (const [type, n] of [['strand', 16], ['strand', 24], ['helix', 20]]) {
+    const span = (bend) => {
+      const residues = bentElement(type, n, bend).residues;
+      return distance(residues[0].CA, residues[residues.length - 1].CA);
+    };
+    const straight = span(0);
+
+    let previous = straight;
+    for (const bend of [30, 60, 90]) {
+      const t = (bend * Math.PI) / 180;
+      const predicted = straight * (Math.sin(t / 2) / (t / 2));
+      const measured = span(bend);
+
+      // Within 8% of a true arc. A strand is stiff and the torsion window is
+      // deliberately narrow, so this is the honest accuracy, not a loose bound:
+      // at bend 0 the same measure is exact.
+      close(measured, predicted, 0.08 * predicted, `${type} ${n} bend ${bend}`);
+      assert.ok(measured < previous, `${type} ${n}: bending further must not straighten it`);
+      previous = measured;
+    }
+  }
+});

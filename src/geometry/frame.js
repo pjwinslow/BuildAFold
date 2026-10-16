@@ -173,3 +173,31 @@ export function transformAbout(blocks, from, to) {
     quaternion: quaternionMultiply(delta, block.quaternion),
   }));
 }
+
+/**
+ * Where to put the next block so it continues the chain from the end of the
+ * last one.
+ *
+ * A new element dropped somewhere convenient has to be reached by a long
+ * linker that crosses the whole design, and has to be dragged and turned
+ * before it is any use. Continuing from the previous block's C-terminal end,
+ * in the previous block's own orientation, means the junction is short and the
+ * piece is already pointing the right way — which is what adding a block to a
+ * chain ought to mean.
+ *
+ * Both blocks are canonical, so each one's own axis is +z in its own frame and
+ * the C-terminal end is the +z end.
+ *
+ * @param {{position: number[], quaternion: number[], extent: number}} previous
+ * @param {number} extent axial length of the block being placed
+ * @param {number} gap space to leave between the two for the linker
+ * @returns {{position: number[], quaternion: number[]}}
+ */
+export function placeAfter(previous, extent, gap) {
+  const axis = rotateByQuaternion([0, 0, 1], previous.quaternion);
+  const reach = previous.extent / 2 + gap + extent / 2;
+  return {
+    position: add(previous.position, scale(axis, reach)),
+    quaternion: [...previous.quaternion],
+  };
+}
